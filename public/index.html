@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14233d">
+  <title>Табель — учёт рабочего времени</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">К содержимому</a>
+  <noscript>Для работы с табелем включите JavaScript.</noscript>
+  <div id="startup" class="center" role="status">Открываем табель…</div>
+  <section id="login" class="login center" aria-labelledby="login-title" hidden>
+    <div class="login-card">
+      <img src="/icons/icon-192.png" width="56" height="56" alt="">
+      <h1 id="login-title">Вход в Табель</h1>
+      <form id="login-form">
+        <label>Логин<input name="username" autocomplete="username" maxlength="40" required></label>
+        <label>Пароль<input name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+        <p class="error" role="alert" hidden></p>
+        <button class="primary">Войти</button>
+      </form>
+      <div id="demo-login" hidden>
+        <p>Посмотреть на примере</p>
+        <div class="demo-choices">
+          <button type="button" data-demo="hr">Кадровик</button>
+          <button type="button" data-demo="master">Мастер</button>
+          <button type="button" data-demo="foreman">Прораб</button>
+          <button type="button" data-demo="engineer">Инженер</button>
+          <button type="button" data-demo="worker">Монтажник</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="brand"><img src="/icons/icon-192.png" width="40" height="40" alt=""><div><strong>Табель</strong><small>Учёт рабочего времени</small></div></div>
+      <nav id="navigation" aria-label="Разделы">
+        <button data-page="tabel" aria-current="page"><span data-icon="calendar"></span>Табель</button>
+        <button data-page="workers"><span data-icon="users"></span>Сотрудники</button>
+        <button data-page="projects"><span data-icon="building"></span>Объекты</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="install" class="install"><span data-icon="download"></span>Установка приложения</button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="trail"><span data-icon="grid"></span><span>Рабочее пространство</span><span class="slash">/</span><strong id="trail-page">Табель</strong></div>
+        <div class="top-account">
+          <span id="demo-tag" class="demo-tag" hidden>Демо</span>
+          <span id="user-avatar" class="avatar account-avatar" aria-hidden="true"></span>
+          <div class="user-label"><strong id="user-name"></strong><small id="user-role"></small></div>
+          <button id="install-mobile" class="icon-button" type="button" title="Установка приложения" aria-label="Установка приложения"><span data-icon="download"></span></button>
+          <button id="logout" class="icon-button" type="button" title="Выйти" aria-label="Выйти"><span data-icon="logout"></span></button>
+        </div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <p id="connection" class="connection" role="status" hidden></p>
+        <p id="notice" class="notice" role="status" hidden></p>
+        <section id="tabel-view" aria-labelledby="page-title">
+          <div class="page-heading">
+            <div><h1 id="page-title">Табель рабочего времени</h1><p id="period-caption"></p></div>
+            <div class="heading-actions">
+              <button type="button" id="close-month" hidden><span data-icon="check"></span>Закрыть месяц</button>
+              <a id="export" class="button"><span data-icon="download"></span>Выгрузить CSV</a>
+              <button type="button" id="add-shift" class="primary"><span data-icon="plus"></span>Добавить смену</button>
+            </div>
+          </div>
+          <p id="month-lock" class="lock-message" role="status" hidden></p>
+          <div id="stats" class="stats" aria-label="Итоги за месяц"></div>
+          <section class="panel schedule" aria-labelledby="schedule-title">
+            <div class="panel-top">
+              <div><h2 id="schedule-title">Журнал смен</h2><p id="week-label"></p></div>
+              <div class="period-controls">
+                <button type="button" id="week-prev" class="icon-button" title="Предыдущая неделя" aria-label="Предыдущая неделя"><span data-icon="left"></span></button>
+                <button type="button" id="today">Сегодня</button>
+                <button type="button" id="week-next" class="icon-button" title="Следующая неделя" aria-label="Следующая неделя"><span data-icon="right"></span></button>
+              </div>
+            </div>
+            <div class="filters">
+              <label class="search"><span data-icon="search"></span><input type="search" id="search" placeholder="Поиск сотрудника" aria-label="Поиск сотрудника"></label>
+              <label class="select-filter"><select id="project-filter" aria-label="Объект"></select></label>
+              <label class="select-filter"><select id="status-filter" aria-label="Статус"></select></label>
+              <div class="month-filter"><select id="month-filter" aria-label="Месяц табеля"></select><select id="year-filter" aria-label="Год табеля"></select></div>
+            </div>
+            <div id="day-selector" class="day-selector" aria-label="Дни недели"></div>
+            <p id="fill-hint" hidden>Потяните за угол заполненной ячейки вправо или вниз.</p>
+            <div id="schedule-desktop" class="schedule-desktop"></div>
+            <div id="schedule-mobile" class="schedule-mobile"></div>
+            <footer id="legend" class="legend" aria-label="Статусы смен"></footer>
+          </section>
+        </section>
+
+        <section id="directory-view" aria-labelledby="directory-title" hidden>
+          <div class="page-heading">
+            <div><h1 id="directory-title"></h1><p id="directory-caption"></p></div>
+            <button type="button" id="add-directory" class="primary"><span data-icon="plus"></span><span id="directory-add-label"></span></button>
+          </div>
+          <div id="directory" class="panel directory"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="editor" aria-labelledby="editor-title">
+    <div class="dialog-head"><div><h2 id="editor-title"></h2><p id="editor-caption" hidden></p></div><button type="button" class="icon-button close-dialog" aria-label="Закрыть"><span data-icon="close"></span></button></div>
+    <div id="editor-body"></div>
+  </dialog>
+</body>
+</html>

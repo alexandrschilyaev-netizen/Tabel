@@ -1,0 +1,22 @@
+{
+  "name": "tabel-mobile",
+  "version": "0.3.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "check": "expo export --platform all"
+  },
+  "dependencies": {
+    "expo": "57.0.17",
+    "expo-file-system": "~57.0.6",
+    "expo-secure-store": "~57.0.2",
+    "expo-sharing": "~57.0.16",
+    "expo-system-ui": "~57.0.3",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
+  }
+}

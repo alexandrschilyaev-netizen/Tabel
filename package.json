@@ -1,0 +1,12 @@
+{
+  "name": "tabel",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "admin": "node src/admin.js"
+  }
+}
