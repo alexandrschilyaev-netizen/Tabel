@@ -15,7 +15,10 @@ const dateFormat = new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'long'
 const monthFormat = new Intl.DateTimeFormat('ru', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const timeFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'short' });
 const asDate = day => new Date(day + 'T00:00:00Z');
-const hours = minutes => Math.floor(minutes / 60) + ' ч' + (minutes % 60 ? ' ' + minutes % 60 + ' мин' : '');
+function hours(minutes) {
+  if (minutes > 0 && minutes < 60) return minutes + ' мин';
+  return Math.floor(minutes / 60) + ' ч' + (minutes % 60 ? ' ' + minutes % 60 + ' мин' : '');
+}
 const defaultAddress = process.env.EXPO_PUBLIC_TABEL_URL ?? '';
 
 function offsetDay(day, offset) {
@@ -128,7 +131,7 @@ function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
       </View>
       <View style={styles.metrics}>
         <View style={styles.metric}><Text style={styles.muted}>Учтено за месяц</Text><Text style={styles.metricValue}>{hours(data.summary.minutes)}</Text>
-          <Text style={styles.muted}>Переработка: {hours(data.summary.overtime_minutes ?? 0)}</Text></View>
+          <Text style={styles.muted}>{rateText(data.summary)}</Text></View>
         <View style={styles.metric}><Text style={styles.muted}>Рабочих смен</Text><Text style={styles.metricValue}>{data.summary.workShifts}</Text></View>
       </View>
       {data.lock && <Text style={styles.lock}>Месяц закрыт · {data.lock.closed_by}</Text>}
@@ -163,6 +166,26 @@ function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
   );
 }
 
+function rateParts(work) {
+  return [
+    ['1', work.regular_minutes],
+    ['1,5', work.overtime_15_minutes],
+    ['2', work.overtime_20_minutes]
+  ].filter(([, minutes]) => minutes > 0);
+}
+
+function rateText(work) {
+  return rateParts(work).map(([rate, minutes]) => hours(minutes) + ' ×' + rate).join(' · ');
+}
+
+function RateBreakdown({ work }) {
+  return rateParts(work).map(([rate, minutes]) => (
+    <Text key={rate} style={[styles.rate, rate === '1,5' && styles.rate15, rate === '2' && styles.rate20]}>
+      {hours(minutes)} ×{rate}
+    </Text>
+  ));
+}
+
 function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
   const title = !shift ? (canEdit ? 'Добавить смену' : 'Нет записи') :
     shift.kind === 'work' ? hours(shift.minutes) + ' · ' + (project?.name ?? '') : kinds[shift.kind];
@@ -174,7 +197,7 @@ function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
       <View style={styles.fill}>
         <Text style={styles.label}>{worker.name}</Text>
         <Text style={styles.muted}>{title}</Text>
-        {extra > 0 && <Text style={styles.overtime}>Переработка: +{hours(extra)}</Text>}
+        {shift && <RateBreakdown work={shift} />}
       </View>
       {!!shift && <Text style={[styles.pill, shift.status === 'closed' && styles.pillClosed]}>
         {shift.status === 'closed' ? 'Закрыта' : 'Учтена'}
@@ -182,7 +205,7 @@ function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
     </>
   );
   if (!shift && !canEdit) return <View style={styles.shiftRow}>{info}</View>;
-  return <Pressable accessibilityRole="button" accessibilityLabel={worker.name + ', ' + title + (extra > 0 ? ', переработка ' + hours(extra) : '')}
+  return <Pressable accessibilityRole="button" accessibilityLabel={worker.name + ', ' + title + (extra > 0 ? ', переработка ' + hours(extra) + ', ' + rateText(shift) : '')}
     onPress={onOpen} style={({ pressed }) => [styles.shiftRow, objectMark, pressed && styles.pressed]}>{info}</Pressable>;
 }
 
@@ -286,14 +309,18 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
     }
   }
   const selectedProject = data.projects.find(p => p.id === project);
-  const extra = shift?.overtime_minutes ?? 0;
   const time = value => {
     const [hour, minute] = value.split(':').map(Number);
     return hour * 60 + minute;
   };
   const gross = time(end) - time(start) + (overnight ? 1440 : 0);
-  const net = gross - Number(pause);
-  const previewOvertime = net > 480 && gross <= 1440 ? net - 480 : 0;
+  const validTime = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const net = validTime(start) && validTime(end) && gross <= 1440 ? Math.max(0, gross - Number(pause)) : 0;
+  const previewRates = {
+    regular_minutes: Math.min(net, 480),
+    overtime_15_minutes: Math.min(Math.max(0, net - 480), 120),
+    overtime_20_minutes: Math.max(0, net - 600)
+  };
   async function copy(values) {
     setError('');
     setBusy(true);
@@ -337,7 +364,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
                       keyboardType="number-pad" maxLength={4} editable={!busy} />
                     <Button title="Конец смены на следующий день" selected={overnight}
                       onPress={() => setOvernight(!overnight)} disabled={busy} />
-                    {previewOvertime > 0 && <Text style={styles.overtime}>Переработка: {hours(previewOvertime)}</Text>}
+                    <RateBreakdown work={previewRates} />
                   </>
                 )}
                 <Field label="Комментарий" value={note} onChangeText={setNote} maxLength={500}
@@ -355,7 +382,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
                   </View>
                   <Text style={styles.body}>{start}–{end}{overnight ? ' (+1 день)' : ''}</Text>
                   <Text style={styles.body}>Перерыв {pause} мин · Учтено {hours(shift.minutes)}</Text>
-                  {extra > 0 && <Text style={styles.overtime}>Переработка: {hours(extra)}</Text>}
+                  <RateBreakdown work={shift} />
                 </>}
                 {!!note && <Text style={styles.body}>{note}</Text>}
               </View>
@@ -431,7 +458,7 @@ function Workspace({ session, onLogout }) {
     Alert.alert('Закрыть месяц?', [
       'Записей: ' + summary.records,
       'Учтено: ' + hours(summary.minutes),
-      'Переработка: ' + hours(summary.overtime_minutes ?? 0),
+      'Часы по коэффициентам: ' + rateText(summary),
       'Сотрудников без записей: ' + summary.workersWithoutRecords,
       'После закрытия месяц доступен только для просмотра.'
     ].join('\n'), [
@@ -594,6 +621,8 @@ const styles = StyleSheet.create({
   editor: { width: '100%', maxWidth: 600, alignSelf: 'center', padding: 20, gap: 12 },
   projectLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   projectDot: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: colors.border },
-  overtime: { color: '#813509', fontSize: 14, fontWeight: '700' },
+  rate: { color: '#243f64', fontSize: 13, fontWeight: '700' },
+  rate15: { color: '#813509' },
+  rate20: { color: '#8c1e35' },
   details: { gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, padding: 12, borderRadius: 12 }
 });

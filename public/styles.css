@@ -234,8 +234,12 @@ dialog::backdrop { background: #0b1930a8 }
 }
 .shift-cell.status-closed[data-project-color] { border: 1px dashed var(--closed) }
 .mobile-shift strong[data-project-color], .project-label { border-radius: 5px; padding: 2px 6px }
-.overtime { display: inline-block; color: #813509; background: #fff1df; padding: 2px 5px; border-radius: 5px; font-weight: 740; font-size: .74rem; white-space: nowrap }
-.week-total .overtime { display: block; width: fit-content; margin: 4px auto 0 }
+.rate-stack { display: flex; align-items: center; flex-direction: column; gap: 3px; margin-top: 4px }
+.details .rate-stack { align-items: flex-start }
+.rate-badge { display: inline-block; color: #243f64; background: #f0f5fe; padding: 2px 4px; border-radius: 5px; font-weight: 740; font-size: .74rem; max-width: 100%; }
+.rate-badge[data-rate="1,5"] { color: #813509; background: #fff1df }
+.rate-badge[data-rate="2"] { color: #8c1e35; background: #fce8ed }
+.rate-preview { color: var(--text); font-size: .87rem; font-weight: 650 }
 .project-entry { display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere }
 .project-swatch { width: 22px; height: 22px; flex: 0 0 22px; border: 1px solid #8794a7; border-radius: 6px; background: var(--project-color, #e2e8f0) }
 input[type=color] { width: 78px; height: 46px; padding: 5px; cursor: pointer }

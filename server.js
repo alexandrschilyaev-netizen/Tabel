@@ -108,7 +108,16 @@ function monthLock(month) {
 }
 
 function withOvertime(shift) {
-  return { ...shift, overtime_minutes: shift.kind === 'work' ? Math.max(0, shift.minutes - 8 * 60) : 0 };
+  const worked = shift.kind === 'work' ? shift.minutes : 0;
+  const overtime = Math.max(0, worked - 8 * 60);
+  const overtime15 = Math.min(overtime, 2 * 60);
+  return {
+    ...shift,
+    regular_minutes: worked - overtime,
+    overtime_minutes: overtime,
+    overtime_15_minutes: overtime15,
+    overtime_20_minutes: overtime - overtime15
+  };
 }
 
 function monthSummary(shifts, workers) {
@@ -118,6 +127,9 @@ function monthSummary(shifts, workers) {
     records: shifts.length,
     workShifts: shifts.filter(shift => shift.kind === 'work').length,
     minutes: shifts.reduce((sum, shift) => sum + shift.minutes, 0),
+    regular_minutes: shifts.reduce((sum, shift) => sum + shift.regular_minutes, 0),
+    overtime_15_minutes: shifts.reduce((sum, shift) => sum + shift.overtime_15_minutes, 0),
+    overtime_20_minutes: shifts.reduce((sum, shift) => sum + shift.overtime_20_minutes, 0),
     overtime_minutes: shifts.reduce((sum, shift) => sum + shift.overtime_minutes, 0),
     workersWithoutRecords: workers.length - recorded.size,
     revision: digest(signature)
@@ -287,8 +299,8 @@ function exportCsv(res, user, month) {
   const { shifts, workers, projects } = data(user, month);
   const names = new Map(workers.map(worker => [worker.id, worker.name]));
   const objects = new Map(projects.map(project => [project.id, project.name]));
-  const rows = [['Дата', 'Сотрудник', 'Вид записи', 'Объект', 'Начало', 'Конец', 'Через полночь', 'Перерыв (мин)', 'Учтено (мин)', 'Статус', 'Комментарий', 'Переработка (мин)']];
-  shifts.forEach(s => rows.push([s.date, names.get(s.worker_id), kinds[s.kind], objects.get(s.project_id), s.start, s.end, s.overnight ? 'Да' : '', s.break_minutes, s.minutes, statuses[s.status], s.note, s.overtime_minutes]));
+  const rows = [['Дата', 'Сотрудник', 'Вид записи', 'Объект', 'Начало', 'Конец', 'Через полночь', 'Перерыв (мин)', 'Учтено (мин)', 'Статус', 'Комментарий', 'Переработка (мин)', 'Обычные ×1 (мин)', 'Переработка ×1,5 (мин)', 'Переработка ×2 (мин)']];
+  shifts.forEach(s => rows.push([s.date, names.get(s.worker_id), kinds[s.kind], objects.get(s.project_id), s.start, s.end, s.overnight ? 'Да' : '', s.break_minutes, s.minutes, statuses[s.status], s.note, s.overtime_minutes, s.regular_minutes, s.overtime_15_minutes, s.overtime_20_minutes]));
   res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="tabel-' + month + '.csv"' });
   res.end('\uFEFF' + rows.map(row => row.map(csvCell).join(';')).join('\r\n') + '\r\n');
 }

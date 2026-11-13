@@ -61,11 +61,26 @@ function weekDays(iso) {
   return Array.from({ length: 7 }, (_, index) => offsetDay(monday, index));
 }
 function hours(minutes) {
+  if (minutes > 0 && minutes < 60) return number.format(minutes) + ' мин';
   const h = Math.floor(minutes / 60);
   return number.format(h) + ' ч' + (minutes % 60 ? ' ' + minutes % 60 + ' мин' : '');
 }
-function overtimeBadge(minutes) {
-  return minutes > 0 ? '<small class="overtime" aria-label="Переработка ' + hours(minutes) + '">+' + hours(minutes) + '</small>' : '';
+function rateParts(work) {
+  return [
+    ['1', work.regular_minutes],
+    ['1,5', work.overtime_15_minutes],
+    ['2', work.overtime_20_minutes]
+  ].filter(([, minutes]) => minutes > 0);
+}
+
+function rateText(work) {
+  return rateParts(work).map(([rate, minutes]) => hours(minutes) + ' ×' + rate).join(' · ');
+}
+
+function rateBadges(work) {
+  return rateParts(work).map(([rate, minutes]) =>
+    '<small class="rate-badge" data-rate="' + rate + '">' + hours(minutes) + ' ×' + rate + '</small>'
+  ).join('');
 }
 
 function colorAttr(color) {
@@ -199,7 +214,7 @@ function render() {
 function renderStats() {
   const { summary, workers, lock, user } = state.data;
   const metrics = [
-    ['Учтено за месяц', hours(summary.minutes), 'Переработка: ' + hours(summary.overtime_minutes), 'clock', ''],
+    ['Учтено за месяц', hours(summary.minutes), rateText(summary) || 'За выбранный месяц', 'clock', ''],
     ['Рабочих смен', number.format(summary.workShifts), 'Сотрудников: ' + number.format(workers.length), 'calendar', ''],
     ['Записей в табеле', number.format(summary.records), 'В том числе отсутствия', 'users', ''],
     ['Статус месяца', lock ? 'Закрыт' : 'Открыт', lock ? 'Просмотр' : 'В работе', 'check', 'approved']
@@ -242,18 +257,18 @@ function renderSchedule() {
   ).join('') + '<th scope="col">Итого</th></tr></thead>';
   const rows = weekWorkers.map((worker, row) => {
     let total = 0;
-    let overtime = 0;
+    const rates = { regular_minutes: 0, overtime_15_minutes: 0, overtime_20_minutes: 0 };
     const cells = dates.map((date, column) => {
       if (!date.startsWith(state.month)) return '<td>·</td>';
       const shift = byWorkerDate.get(worker.id + ':' + date);
       if (filtering && !matches(shift)) return '<td>·</td>';
       if (!shift && !canEdit) return '<td>—</td>';
       total += shift?.minutes ?? 0;
-      overtime += shift?.overtime_minutes ?? 0;
+      for (const key of Object.keys(rates)) rates[key] += shift?.[key] ?? 0;
       const project = projectsById.get(shift?.project_id);
       const work = shift?.kind === 'work';
       const label = shift ? (work ? hours(shift.minutes) + ', ' + (project?.name ?? '') : kinds[shift.kind]) +
-        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) : '') + ', ' + statuses[shift.status] : 'Добавить смену';
+        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) + ' (' + rateText(shift) + ')' : '') + ', ' + statuses[shift.status] : 'Добавить смену';
       const fillCell = canEdit && !filtering
         ? ' data-fill-row="' + row + '" data-fill-column="' + column + '" data-fill-date="' + date + '"' : '';
       const hasHandle = fillCell && shift && shift.status !== 'closed';
@@ -262,11 +277,11 @@ function renderSchedule() {
       return '<td' + fillCell + '><button type="button" class="shift-cell ' + (shift ? 'status-' + shift.status : 'empty') +
         (hasHandle ? ' has-fill' : '') + '" data-worker="' + worker.id + '" data-date="' + date + '"' + colorAttr(project?.color) +
         ' aria-label="' + safe(worker.name + ', ' + dayLabel(date) + ', ' + label) + '" title="' + safe(label) + '">' +
-        (work ? '<strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' + overtimeBadge(shift.overtime_minutes)
+        (work ? '<strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' + rateBadges(shift)
           : shift ? '<small>' + kinds[shift.kind] + '</small>' : '—') + '</button>' + handle + '</td>';
     }).join('');
     return '<tr><th scope="row">' + person(worker, workerCaption(worker)) + '</th>' + cells +
-      '<td class="week-total">' + hours(total) + overtimeBadge(overtime) + '</td></tr>';
+      '<td class="week-total">' + hours(total) + '<span class="rate-stack">' + rateBadges(rates) + '</span>' + '</td></tr>';
   }).join('');
   grid.innerHTML = weekWorkers.length
     ? '<table aria-label="Смены сотрудников за неделю">' + tableHeader + '<tbody>' + rows + '</tbody></table>'
@@ -276,7 +291,7 @@ function renderSchedule() {
     const project = projectsById.get(shift?.project_id);
     const details = shift
       ? '<strong' + colorAttr(project?.color) + '>' + (shift.kind === 'work' ? hours(shift.minutes) + ' · ' + safe(project?.name) : kinds[shift.kind]) +
-        '</strong>' + overtimeBadge(shift.overtime_minutes) + statusPill(shift.status)
+        '</strong>' + rateBadges(shift) + statusPill(shift.status)
       : '<span>' + (canEdit ? 'Добавить смену' : 'Нет записи') + '</span>';
     const content = person(worker, workerCaption(worker)) + '<span class="mobile-shift">' + details + '</span>';
     return shift || canEdit ? '<button class="mobile-row" type="button" data-worker="' + worker.id + '" data-date="' + state.day + '">' +
@@ -376,7 +391,7 @@ function openShift(workerId, date) {
     '<div class="form-grid">' + field('Начало', 'start', 'type="time" value="' + (shift?.start ?? '08:00') + '"') +
     field('Конец', 'end', 'type="time" value="' + (shift?.end ?? '17:00') + '"') + '</div>' +
     field('Перерыв, мин', 'pause', 'type="number" inputmode="numeric" min="0" max="1439" value="' + (shift?.break_minutes ?? 0) + '"') +
-    '<label class="check"><input name="overnight" type="checkbox"' + (shift?.overnight ? ' checked' : '') + '>Смена заканчивается на следующий день</label><p class="overtime" data-overtime hidden></p></div>' +
+    '<label class="check"><input name="overnight" type="checkbox"' + (shift?.overnight ? ' checked' : '') + '>Смена заканчивается на следующий день</label><p class="rate-preview" data-overtime role="status" hidden></p></div>' +
     '<label>Комментарий<textarea name="note" rows="2" maxlength="500">' + safe(shift?.note) + '</textarea></label>' +
     errorMarkup + '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">Сохранить запись</button></div></form>' +
     (shift && fillAvailable() ? '<button type="button" data-fill-picker="' + shift.id + '">Заполнить диапазон</button>' : '') +
@@ -393,9 +408,13 @@ function openShift(workerId, date) {
     const minutes = value => value.split(':').map(Number).reduce((h, m) => h * 60 + m);
     const total = minutes(fields.end.value) - minutes(fields.start.value) + (fields.overnight.checked ? 1440 : 0);
     const pause = Number(fields.pause.value);
-    const extra = total <= 1440 && pause >= 0 ? total - pause - 480 : 0;
-    alertIn(form.querySelector('[data-overtime]'), fields.start.value && fields.end.value && extra > 0
-      ? 'Переработка: ' + hours(extra) : '');
+    const net = fields.start.value && fields.end.value && total <= 1440 && Number.isInteger(pause) && pause >= 0
+      ? Math.max(0, total - pause) : 0;
+    alertIn(form.querySelector('[data-overtime]'), rateText({
+      regular_minutes: Math.min(net, 480),
+      overtime_15_minutes: Math.min(Math.max(0, net - 480), 120),
+      overtime_20_minutes: Math.max(0, net - 600)
+    }));
   };
   form.elements.kind.addEventListener('change', toggle);
   form.addEventListener('input', preview);
@@ -446,7 +465,7 @@ function openDetails(shift) {
     '<div><dt>Статус</dt><dd>' + statusPill(shift.status) + '</dd></div><div><dt>Вид записи</dt><dd>' + kinds[shift.kind] + '</dd></div>' +
     (work ? '<div><dt>Объект</dt><dd><span class="project-label"' + colorAttr(project?.color) + '>' + safe(project?.name) +
       '</span></dd></div><div><dt>Учтено</dt><dd>' + hours(shift.minutes) +
-      '</dd></div>' + (shift.overtime_minutes ? '<div><dt>Переработка</dt><dd class="overtime">' + hours(shift.overtime_minutes) + '</dd></div>' : '') +
+      '</dd></div>' + '<div><dt>Часы по коэффициентам</dt><dd class="rate-stack">' + rateBadges(shift) + '</dd></div>' +
       '<div><dt>Рабочее время</dt><dd>' + shift.start + '–' + shift.end + (shift.overnight ? ' (+1 день)' : '') +
       '</dd></div><div><dt>Перерыв</dt><dd>' + shift.break_minutes + ' мин</dd></div>' : '') +
     (shift.note ? '<div class="wide"><dt>Комментарий</dt><dd>' + safe(shift.note) + '</dd></div>' : '') + '</dl>' +
@@ -512,7 +531,7 @@ function openMonthClose() {
   openDialog('Закрытие месяца', $('#period-caption').textContent.split(' · ')[0], '<form class="editor-form">' +
     '<dl class="details"><div><dt>Записей</dt><dd>' + number.format(summary.records) +
     '</dd></div><div><dt>Учтённое время</dt><dd>' + hours(summary.minutes) +
-    '</dd></div><div><dt>Переработка</dt><dd>' + hours(summary.overtime_minutes) +
+    '</dd></div><div><dt>Часы по коэффициентам</dt><dd>' + rateText(summary) +
     '</dd></div><div><dt>Сотрудников без записей</dt><dd>' + number.format(summary.workersWithoutRecords) + '</dd></div></dl>' +
     '<p>После закрытия месяц доступен только для просмотра. Проверьте итог перед подтверждением.</p>' + errorMarkup +
     '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">Подтвердить закрытие</button></div></form>');
