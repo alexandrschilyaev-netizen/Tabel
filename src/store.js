@@ -8,6 +8,13 @@ const deriveKey = promisify(scrypt);
 export const roles = { worker: 'Монтажник', master: 'Мастер', foreman: 'Прораб', engineer: 'Инженер', hr: 'Кадровик' };
 export const statuses = { approved: 'Учтена', closed: 'Закрыта' };
 export const projectColors = ['#2563eb', '#15803d', '#b45309', '#7c3aed', '#be185d', '#0e7490', '#b91c1c', '#475569'];
+const legacyHolidays = [
+  ['2026-01-01', 'Новый год'], ['2026-01-07', 'Рождество'],
+  ['2026-02-23', 'День защитника Отечества'], ['2026-03-08', '8 Марта'],
+  ['2026-05-01', 'Праздник Весны и Труда'], ['2026-05-09', 'День Победы'],
+  ['2026-06-12', 'День России'], ['2026-11-04', 'День народного единства']
+];
+
 export const kinds = { work: 'Работа', vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Выходной' };
 export const timeZone = process.env.TABEL_TIME_ZONE || 'Europe/Moscow';
 const dateFormat = new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short' });
@@ -93,6 +100,10 @@ export function openStore(demo = false) {
       month TEXT PRIMARY KEY, closed_by INTEGER NOT NULL REFERENCES users(id),
       closed_at TEXT NOT NULL DEFAULT (datetime('now'))
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS calendar_days (
+      date TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('holiday','shortened')), name TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY) STRICT;
     CREATE TABLE IF NOT EXISTS mobile_sessions (
       digest TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires INTEGER NOT NULL
     ) STRICT;
@@ -116,6 +127,21 @@ export function openStore(demo = false) {
       db.exec('ROLLBACK;');
       throw error;
     }
+  }
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    if (!db.prepare('PRAGMA table_info(month_locks)').all().some(column => column.name === 'calendar_policy')) {
+      db.exec('ALTER TABLE month_locks ADD COLUMN calendar_policy INTEGER NOT NULL DEFAULT 0;');
+    }
+    const marker = db.prepare("INSERT OR IGNORE INTO app_migrations VALUES('legacy_holidays_2026')").run();
+    if (marker.changes) {
+      const insert = db.prepare("INSERT OR IGNORE INTO calendar_days(date,kind,name) VALUES(?,'holiday',?)");
+      legacyHolidays.forEach(day => insert.run(...day));
+    }
+    db.exec('COMMIT;');
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
   }
   return db;
 }

@@ -3,7 +3,7 @@ const roles = { worker: 'Монтажник', master: 'Мастер', foreman: '
 const projectColors = ['#2563eb', '#15803d', '#b45309', '#7c3aed', '#be185d', '#0e7490', '#b91c1c', '#475569'];
 const statuses = { approved: 'Учтена', closed: 'Закрыта' };
 const kinds = { work: 'Работа', vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Выходной' };
-const pages = { tabel: 'Табель', workers: 'Сотрудники', projects: 'Объекты' };
+const pages = { tabel: 'Табель', workers: 'Сотрудники', projects: 'Объекты', calendar: 'Праздники' };
 const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const weekdays = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const paths = {
@@ -19,11 +19,15 @@ const paths = {
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  note: '<path d="M4 5h16v11H9l-5 4zM8 9h8m-8 3h5"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>'
 };
 const state = { session: null, data: null, month: '', day: '', page: 'tabel' };
 const editor = $('#editor');
 const grid = $('#schedule-desktop');
+let calendarYear = '';
+let calendarEntries = [];
+let calendarRequest = 0;
 let fillWorkers = [];
 let dragFill = null;
 let ignoreHandleClick = false;
@@ -182,7 +186,11 @@ async function enter() {
   $('#search').value = '';
   $('#project-filter').value = '';
   $('#status-filter').value = '';
-  state.page = user.role === 'worker' ? 'tabel' : activePage();
+  state.page = activePage(user.role);
+  calendarYear = '';
+  calendarEntries = [];
+  $('#app').classList.toggle('hr-view', user.role === 'hr');
+  $('[data-page=calendar]').hidden = user.role !== 'hr';
   notice('');
   await load(session.today.slice(0, 7), session.today);
   connection();
@@ -203,10 +211,15 @@ function render() {
   $('#close-month').hidden = user.role !== 'hr' || Boolean(lock);
   $('#close-month').disabled = !summary.records;
   alertIn($('#month-lock'), lock ? 'Месяц закрыт · ' + lock.closed_by + ' · ' + timestamp(lock.closed_at) : '');
+  $('#calendar-period').hidden = state.page !== 'calendar';
+  if (state.page === 'calendar') {
+    renderCalendar();
+    return;
+  }
   if (state.page !== 'tabel') return renderDirectory(user);
   const month = monthNames[Number(state.month.slice(5)) - 1] + ' ' + state.month.slice(0, 4);
   $('#period-caption').textContent = month + (user.role === 'worker' ? ' · Мои смены' : user.role === 'hr' ? ' · Все сотрудники' : ' · Назначенные сотрудники');
-  $('#export').href = '/api/export?month=' + state.month;
+  $('#export').href = '/api/export.xlsx?month=' + state.month;
   renderStats();
   renderSchedule();
 }
@@ -230,6 +243,12 @@ function renderSchedule() {
   clearDragFill();
   const { workers, shifts, projects, today, canEdit } = state.data;
   const dates = weekDays(state.day);
+  const special = new Map(state.data.calendar.map(day => [day.date, day]));
+  const dayTag = date => {
+    const entry = special.get(date);
+    return entry ? '<small class="calendar-tag ' + entry.kind + '" title="' + safe(entry.name) + '">' +
+      (entry.kind === 'holiday' ? 'Праздник' : '7 ч') + '</small>' : '';
+  };
   const query = $('#search').value.trim().toLowerCase();
   const projectFilter = Number($('#project-filter').value);
   const statusFilter = $('#status-filter').value;
@@ -249,11 +268,11 @@ function renderSchedule() {
   $('#week-next').disabled = offsetDay(monthDays.at(-1), 1) > '2099-12-31';
   $('#day-selector').innerHTML = dates.map(date => '<button data-day="' + date + '" aria-label="' + dayLabel(date) +
     '" aria-pressed="' + (state.day === date) + '"' + (date.startsWith(state.month) ? '' : ' disabled') +
-    '><small>' + weekdays[dayOfWeek(date)] + '</small><strong>' + Number(date.slice(8)) + '</strong></button>').join('');
+    '><small>' + weekdays[dayOfWeek(date)] + '</small><strong>' + Number(date.slice(8)) + '</strong>' + dayTag(date) + '</button>').join('');
   const emptyMessage = !workers.length ? 'В табеле пока нет сотрудников.' : 'По выбранным условиям смены не найдены.';
   const tableHeader = '<thead><tr><th scope="col">Сотрудник</th>' + dates.map(date =>
     '<th scope="col" class="' + (date === today ? 'current-day' : [0, 6].includes(dayOfWeek(date)) ? 'weekend' : '') + '">' +
-    '<span>' + weekdays[dayOfWeek(date)] + '</span><strong>' + Number(date.slice(8)) + '</strong></th>'
+    '<span>' + weekdays[dayOfWeek(date)] + '</span><strong>' + Number(date.slice(8)) + '</strong>' + dayTag(date) + '</th>'
   ).join('') + '<th scope="col">Итого</th></tr></thead>';
   const rows = weekWorkers.map((worker, row) => {
     let total = 0;
@@ -268,7 +287,7 @@ function renderSchedule() {
       const project = projectsById.get(shift?.project_id);
       const work = shift?.kind === 'work';
       const label = shift ? (work ? hours(shift.minutes) + ', ' + (project?.name ?? '') : kinds[shift.kind]) +
-        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) + ' (' + rateText(shift) + ')' : '') + ', ' + statuses[shift.status] : 'Добавить смену';
+        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) + ' (' + rateText(shift) + ')' : '') + ', ' + statuses[shift.status] + (shift.note ? ', есть комментарий' : '') : 'Добавить смену';
       const fillCell = canEdit && !filtering
         ? ' data-fill-row="' + row + '" data-fill-column="' + column + '" data-fill-date="' + date + '"' : '';
       const hasHandle = fillCell && shift && shift.status !== 'closed';
@@ -277,8 +296,10 @@ function renderSchedule() {
       return '<td' + fillCell + '><button type="button" class="shift-cell ' + (shift ? 'status-' + shift.status : 'empty') +
         (hasHandle ? ' has-fill' : '') + '" data-worker="' + worker.id + '" data-date="' + date + '"' + colorAttr(project?.color) +
         ' aria-label="' + safe(worker.name + ', ' + dayLabel(date) + ', ' + label) + '" title="' + safe(label) + '">' +
-        (work ? '<strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' + rateBadges(shift)
-          : shift ? '<small>' + kinds[shift.kind] + '</small>' : '—') + '</button>' + handle + '</td>';
+        (work ? '<span class="shift-main"><strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' +
+          (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') + '</span>' +
+          '<span class="shift-rates">' + rateBadges(shift) + '</span>'
+          : shift ? '<small>' + kinds[shift.kind] + '</small>' + (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') : '—') + '</button>' + handle + '</td>';
     }).join('');
     return '<tr><th scope="row">' + person(worker, workerCaption(worker)) + '</th>' + cells +
       '<td class="week-total">' + hours(total) + '<span class="rate-stack">' + rateBadges(rates) + '</span>' + '</td></tr>';
@@ -291,7 +312,8 @@ function renderSchedule() {
     const project = projectsById.get(shift?.project_id);
     const details = shift
       ? '<strong' + colorAttr(project?.color) + '>' + (shift.kind === 'work' ? hours(shift.minutes) + ' · ' + safe(project?.name) : kinds[shift.kind]) +
-        '</strong>' + rateBadges(shift) + statusPill(shift.status)
+        '</strong>' + '<span class="shift-rates">' + rateBadges(shift) + '</span>' +
+        (shift.note ? '<small class="comment-mark">' + icon('note') + 'Есть комментарий</small>' : '') + statusPill(shift.status)
       : '<span>' + (canEdit ? 'Добавить смену' : 'Нет записи') + '</span>';
     const content = person(worker, workerCaption(worker)) + '<span class="mobile-shift">' + details + '</span>';
     return shift || canEdit ? '<button class="mobile-row" type="button" data-worker="' + worker.id + '" data-date="' + state.day + '">' +
@@ -392,7 +414,7 @@ function openShift(workerId, date) {
     field('Конец', 'end', 'type="time" value="' + (shift?.end ?? '17:00') + '"') + '</div>' +
     field('Перерыв, мин', 'pause', 'type="number" inputmode="numeric" min="0" max="1439" value="' + (shift?.break_minutes ?? 0) + '"') +
     '<label class="check"><input name="overnight" type="checkbox"' + (shift?.overnight ? ' checked' : '') + '>Смена заканчивается на следующий день</label><p class="rate-preview" data-overtime role="status" hidden></p></div>' +
-    '<label>Комментарий<textarea name="note" rows="2" maxlength="500">' + safe(shift?.note) + '</textarea></label>' +
+    '<label>Комментарий<textarea name="note" aria-label="Комментарий" rows="2" maxlength="500">' + safe(shift?.note) + '</textarea></label>' +
     errorMarkup + '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">Сохранить запись</button></div></form>' +
     (shift && fillAvailable() ? '<button type="button" data-fill-picker="' + shift.id + '">Заполнить диапазон</button>' : '') +
     (shift ? historyMarkup() : '')
@@ -410,10 +432,15 @@ function openShift(workerId, date) {
     const pause = Number(fields.pause.value);
     const net = fields.start.value && fields.end.value && total <= 1440 && Number.isInteger(pause) && pause >= 0
       ? Math.max(0, total - pause) : 0;
+    const activeDate = date || fields.date.value;
+    if (!activeDate) return alertIn(form.querySelector('[data-overtime]'), '');
+    const rule = state.data.calendar.find(day => day.date === activeDate)?.kind ??
+      ([0, 6].includes(dayOfWeek(activeDate)) ? 'weekend' : 'regular');
+    const normal = rule === 'holiday' || rule === 'weekend' ? 0 : rule === 'shortened' ? 420 : 480;
+    const extra = Math.max(0, net - normal);
+    const first = normal ? Math.min(extra, 120) : 0;
     alertIn(form.querySelector('[data-overtime]'), rateText({
-      regular_minutes: Math.min(net, 480),
-      overtime_15_minutes: Math.min(Math.max(0, net - 480), 120),
-      overtime_20_minutes: Math.max(0, net - 600)
+      regular_minutes: net - extra, overtime_15_minutes: first, overtime_20_minutes: extra - first
     }));
   };
   form.elements.kind.addEventListener('change', toggle);
@@ -473,7 +500,64 @@ function openDetails(shift) {
   bindHistory(shift);
 }
 
+function renderCalendar() {
+  $('#directory-title').textContent = 'Праздники';
+  $('#directory-caption').textContent = 'Праздники и сокращённые предпраздничные дни';
+  $('#add-directory').hidden = false;
+  $('#directory-add-label').textContent = 'Добавить дату';
+  if (!calendarYear) calendarYear = state.month.slice(0, 4);
+  $('#calendar-year').value = calendarYear;
+  fetchCalendar();
+}
+
+async function fetchCalendar() {
+  const request = ++calendarRequest;
+  const list = $('#directory');
+  list.setAttribute('aria-busy', 'true');
+  list.textContent = 'Загрузка…';
+  try {
+    const entries = await api('calendar?year=' + calendarYear);
+    if (request !== calendarRequest || state.page !== 'calendar') return;
+    calendarEntries = entries;
+    list.innerHTML = entries.map(day => '<div class="directory-row"><div><strong>' + dayLabel(day.date) +
+      '</strong><div>' + safe(day.name) + '</div><small>' + (day.kind === 'holiday' ? 'Праздник · ×2' : 'Предпраздничный · норма 7 ч') +
+      '</small></div>' + (day.locked ? '<small>Месяц закрыт</small>' :
+        '<button type="button" data-calendar-edit="' + day.date + '">Изменить</button>') + '</div>').join('') ||
+      '<p class="empty-state">В этом году пока нет особых дат.</p>';
+  } catch (error) {
+    if (request === calendarRequest && state.page === 'calendar') list.textContent = error.message;
+  } finally {
+    if (request === calendarRequest) list.removeAttribute('aria-busy');
+  }
+}
+
+function openCalendarEditor(day = null, removing = false) {
+  const initialDate = day?.date ?? (state.day.startsWith(calendarYear) ? state.day : calendarYear + '-01-01');
+  const endpoint = day ? 'calendar/' + day.date : 'calendar';
+  openDialog(removing ? 'Удалить особую дату' : day ? 'Изменить особую дату' : 'Добавить особую дату', '', '<form class="editor-form">' +
+    (removing ? '<p>' + dayLabel(day.date) + ' · ' + safe(day.name) + '</p>' :
+      field('Дата', 'date', 'type="date" required min="2000-01-01" max="2099-12-31" value="' + initialDate + '"') +
+      selectField('Вид дня', 'kind', option('holiday', 'Праздник — часы ×2', day?.kind !== 'shortened') +
+        option('shortened', 'Предпраздничный — норма 7 ч', day?.kind === 'shortened')) +
+      field('Название', 'name', 'maxlength="120" value="' + safe(day?.name) + '"')) +
+    errorMarkup + '<div class="dialog-actions">' + (day && !removing ? '<button type="button" data-calendar-remove="' +
+      day.date + '">Удалить дату</button>' : '') + cancel + '<button class="primary" type="submit">' +
+      (removing ? 'Удалить' : 'Сохранить') + '</button></div></form>');
+  const form = editor.querySelector('form');
+  if (!removing) {
+    const validate = () => { form.elements.name.required = form.elements.kind.value === 'holiday'; };
+    form.elements.kind.addEventListener('change', validate);
+    validate();
+  }
+  bindForm(form, async fields => {
+    const date = removing ? day.date : fields.date.value;
+    await api(endpoint, removing ? { date, remove: true } : { date, kind: fields.kind.value, name: fields.name.value });
+    calendarYear = date.slice(0, 4);
+  }, removing ? 'Дата удалена.' : 'Дата сохранена.');
+}
+
 function openDirectoryEditor(project = null) {
+  if (state.page === 'calendar') return openCalendarEditor();
   const workers = state.page === 'workers';
   const color = project?.color ?? projectColors.find(value => !state.data.projects.some(item => item.color === value)) ?? projectColors[0];
   openDialog(workers ? 'Добавление сотрудника' : project ? 'Изменение объекта' : 'Добавление объекта', '', '<form class="editor-form">' +
@@ -759,9 +843,9 @@ $('#logout').addEventListener('click', async () => {
   try { await api('logout', {}); await enter(); }
   catch (error) { notice(error.message, true); }
 });
-function activePage() {
+function activePage(role = state.data?.user.role) {
   const page = location.hash.slice(1);
-  return Object.hasOwn(pages, page) ? page : 'tabel';
+  return role !== 'worker' && Object.hasOwn(pages, page) && (page !== 'calendar' || role === 'hr') ? page : 'tabel';
 }
 
 $('#navigation').addEventListener('click', event => {
@@ -778,6 +862,8 @@ window.addEventListener('hashchange', () => {
 });
 $('#editor').addEventListener('click', event => {
   if (event.target.closest('.close-dialog')) editor.close();
+  const remove = event.target.closest('[data-calendar-remove]');
+  if (remove) openCalendarEditor(calendarEntries.find(day => day.date === remove.dataset.calendarRemove), true);
   const picker = event.target.closest('[data-fill-picker]');
   if (picker) openFillPicker(state.data.shifts.find(shift => shift.id === Number(picker.dataset.fillPicker)));
 });
@@ -793,10 +879,17 @@ $('#add-shift').addEventListener('click', () => openShift());
 $('#add-directory').addEventListener('click', () => openDirectoryEditor());
 $('#close-month').addEventListener('click', openMonthClose);
 $('#directory').addEventListener('click', event => {
+  const calendar = event.target.closest('[data-calendar-edit]');
+  if (calendar) openCalendarEditor(calendarEntries.find(day => day.date === calendar.dataset.calendarEdit));
   const button = event.target.closest('[data-assign]');
   if (button) openAssignments(Number(button.dataset.assign));
   const edit = event.target.closest('[data-project-edit]');
   if (edit) openDirectoryEditor(state.data.projects.find(item => item.id === Number(edit.dataset.projectEdit)));
+});
+$('#calendar-year').innerHTML = $('#year-filter').innerHTML;
+$('#calendar-year').addEventListener('change', event => {
+  calendarYear = event.target.value;
+  fetchCalendar();
 });
 $('#week-prev').addEventListener('click', () => changeWeek(-1));
 $('#week-next').addEventListener('click', () => changeWeek(1));

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import { buildTimesheet } from './src/timesheet-xlsx.js';
 import { readFileSync } from 'node:fs';
 import { openStore, seedDemo, hashPassword, checkPassword, localDate, roles, statuses, kinds, projectColors } from './src/store.js';
 
@@ -103,16 +104,31 @@ function scope(user) {
 }
 
 function monthLock(month) {
-  return db.prepare(`SELECT m.closed_at,u.name AS closed_by
+  return db.prepare(`SELECT m.closed_at,m.calendar_policy,u.name AS closed_by
     FROM month_locks m JOIN users u ON u.id=m.closed_by WHERE m.month=?`).get(month) || null;
 }
 
-function withOvertime(shift) {
+function calendarDays(period) {
+  return db.prepare('SELECT date,kind,name FROM calendar_days WHERE date>=? AND date<=? ORDER BY date')
+    .all(period + (period.length === 4 ? '-01-01' : '-01'), period + (period.length === 4 ? '-12-31' : '-31'));
+}
+
+function dayRule(date, special, useCalendar = true) {
+  if (!useCalendar) return 'regular';
+  if (special) return special.kind;
+  const day = new Date(date + 'T00:00:00Z').getUTCDay();
+  return day === 0 || day === 6 ? 'weekend' : 'regular';
+}
+
+function withOvertime(shift, rule) {
   const worked = shift.kind === 'work' ? shift.minutes : 0;
-  const overtime = Math.max(0, worked - 8 * 60);
-  const overtime15 = Math.min(overtime, 2 * 60);
+  const doubleDay = rule === 'holiday' || rule === 'weekend';
+  const normal = doubleDay ? 0 : rule === 'shortened' ? 7 * 60 : 8 * 60;
+  const overtime = Math.max(0, worked - normal);
+  const overtime15 = doubleDay ? 0 : Math.min(overtime, 2 * 60);
   return {
     ...shift,
+    day_rule: rule,
     regular_minutes: worked - overtime,
     overtime_minutes: overtime,
     overtime_15_minutes: overtime15,
@@ -120,9 +136,9 @@ function withOvertime(shift) {
   };
 }
 
-function monthSummary(shifts, workers) {
+function monthSummary(shifts, workers, calendar) {
   const recorded = new Set(shifts.map(shift => shift.worker_id));
-  const signature = shifts.map(shift => shift.id + ':' + shift.version).join(',') + '|' + workers.map(worker => worker.id).join(',');
+  const signature = shifts.map(shift => shift.id + ':' + shift.version).join(',') + '|' + workers.map(worker => worker.id).join(',') + '|' + JSON.stringify(calendar);
   return {
     records: shifts.length,
     workShifts: shifts.filter(shift => shift.kind === 'work').length,
@@ -145,8 +161,12 @@ function data(user, month) {
   const [where, id] = scope(user);
   const workers = db.prepare('SELECT u.id,u.name,u.grade FROM users u WHERE ' + where).all(id)
     .sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.id - b.id);
+  const lock = monthLock(month);
+  const calendar = calendarDays(month);
+  const special = new Map(calendar.map(day => [day.date, day]));
   const shifts = db.prepare(`SELECT s.* FROM shifts s JOIN users u ON u.id=s.worker_id
-    WHERE ${where} AND s.date BETWEEN ? AND ? ORDER BY s.date,s.worker_id`).all(id, month + '-01', month + '-31').map(withOvertime);
+    WHERE ${where} AND s.date BETWEEN ? AND ? ORDER BY s.date,s.worker_id`).all(id, month + '-01', month + '-31')
+    .map(shift => withOvertime(shift, dayRule(shift.date, special.get(shift.date), !lock || lock.calendar_policy === 1)));
   const allProjects = db.prepare('SELECT * FROM projects ORDER BY id').all();
   const projectIds = new Set(shifts.map(shift => shift.project_id));
   const projects = user.role === 'worker' ? allProjects.filter(project => projectIds.has(project.id)) : allProjects;
@@ -159,10 +179,9 @@ function data(user, month) {
       workerById.get(a.worker_id)?.supervisor_ids.push(a.supervisor_id);
     }
   }
-  const lock = monthLock(month);
   return {
     user: { id: user.id, name: user.name, role: user.role }, today: localDate(), workers, shifts, projects, staff,
-    month, lock, summary: monthSummary(shifts, workers), canEdit: !lock && user.role !== 'worker', demo
+    month, lock, calendar, summary: monthSummary(shifts, workers, calendar), canEdit: !lock && user.role !== 'worker', demo
   };
 }
 
@@ -229,7 +248,7 @@ function writeShift(user, cell, values, { replace = true, source = null } = {}) 
       VALUES(?,?,?,?,?,?,?,?,?,?,'approved') RETURNING *`).get(cell.worker_id, cell.date, ...values, note);
   }
   logShift(saved.id, user.id, source ? 'filled' : current ? 'edited' : 'created', source?.date ?? null);
-  return withOvertime(saved);
+  return withOvertime(saved, dayRule(saved.date, db.prepare('SELECT kind FROM calendar_days WHERE date=?').get(saved.date)));
 }
 
 function saveShift(user, body) {
@@ -279,13 +298,34 @@ function closeMonth(user, body) {
     requireThat(snapshot.summary.records, 409, 'В выбранном месяце пока нет записей.');
     requireThat(snapshot.summary.revision === revision, 409, 'Табель изменился. Обновите месяц и проверьте итоги.');
     const period = [month + '-01', month + '-31'];
-    db.prepare('INSERT INTO month_locks(month,closed_by) VALUES(?,?)').run(month, user.id);
+    db.prepare('INSERT INTO month_locks(month,closed_by,calendar_policy) VALUES(?,?,1)').run(month, user.id);
     db.prepare(`UPDATE shifts SET status='closed',version=version+1
       WHERE date BETWEEN ? AND ? AND status<>'closed'`).run(...period);
     db.prepare(`INSERT INTO events(shift_id,actor_id,action,detail)
       SELECT id,?,'month_closed',? FROM shifts WHERE date BETWEEN ? AND ?`).run(user.id, month, ...period);
     return monthLock(month);
   });
+}
+
+function changeCalendar(user, body, originalDate = null) {
+  requireThat(user.role === 'hr', 403, 'Справочник изменяет кадровик.');
+  const date = body.date;
+  requireThat(validDate(date), 400, 'Введите корректную дату.');
+  const remove = body.remove === true;
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  requireThat(remove ? Boolean(originalDate) : ['holiday', 'shortened'].includes(body.kind)
+    && name.length <= 120 && (body.kind !== 'holiday' || name.length > 0), 400, 'Проверьте вид и название дня.');
+  transaction(() => {
+    requireThat(!monthLock(date.slice(0, 7)) && (!originalDate || !monthLock(originalDate.slice(0, 7))),
+      409, 'Календарь закрытого месяца изменить нельзя.');
+    const find = db.prepare('SELECT 1 FROM calendar_days WHERE date=?');
+    requireThat(!originalDate || find.get(originalDate), 404, 'Дата не найдена.');
+    requireThat(date === originalDate || !find.get(date), 409, 'Для этой даты уже задан особый день.');
+    if (originalDate) db.prepare('DELETE FROM calendar_days WHERE date=?').run(originalDate);
+    if (!remove) db.prepare('INSERT INTO calendar_days(date,kind,name) VALUES(?,?,?)')
+      .run(date, body.kind, name || 'Предпраздничный день');
+  });
+  return { ok: true };
 }
 
 function csvCell(value) {
@@ -440,6 +480,13 @@ async function handle(req, res) {
   requireThat(user, 401, 'Войдите в приложение.');
   const month = url.searchParams.get('month') || localDate().slice(0, 7);
   if (method === 'GET' && path === '/api/tabel') return json(res, data(user, month));
+  if (method === 'GET' && path === '/api/export.xlsx') {
+    requireThat(user.role !== 'worker', 403, 'Выгрузка доступна руководителям и кадровику.');
+    const workbook = buildTimesheet(data(user, month));
+    res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="tabel-' + month + '.xlsx"', 'Content-Length': workbook.length });
+    return res.end(workbook);
+  }
   if (method === 'GET' && path === '/api/export') {
     requireThat(user.role !== 'worker', 403, 'Выгрузка доступна руководителям и кадровику.');
     return exportCsv(res, user, month);
@@ -447,6 +494,15 @@ async function handle(req, res) {
   if (method === 'POST' && path === '/api/shifts/fill') return json(res, fillShifts(user, await readJson(req, 131072)));
   if (method === 'POST' && path === '/api/shifts') return json(res, saveShift(user, await readJson(req)));
   if (method === 'POST' && path === '/api/months/close') return json(res, closeMonth(user, await readJson(req)));
+  if (method === 'GET' && path === '/api/calendar') {
+    requireThat(user.role === 'hr', 403, 'Справочник доступен кадровику.');
+    const year = url.searchParams.get('year') ?? month.slice(0, 4);
+    requireThat(/^20\d{2}$/.test(year), 400, 'Выберите корректный год.');
+    const locks = new Set(db.prepare('SELECT month FROM month_locks WHERE month>=? AND month<=?').all(year + '-01', year + '-12').map(row => row.month));
+    return json(res, calendarDays(year).map(day => ({ ...day, locked: locks.has(day.date.slice(0, 7)) })));
+  }
+  const calendarPath = path.match(/^\/api\/calendar(?:\/(20\d{2}-\d{2}-\d{2}))?$/);
+  if (method === 'POST' && calendarPath) return json(res, changeCalendar(user, await readJson(req), calendarPath[1]));
   const assignmentPath = path.match(/^\/api\/users\/(\d+)\/assignments$/);
   if (method === 'POST' && assignmentPath) {
     const body = await readJson(req);

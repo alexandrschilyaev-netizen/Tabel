@@ -29,7 +29,7 @@ export async function clearSession(address) {
 }
 
 export async function api(session, path, body, format = 'json') {
-  const headers = { Accept: format === 'text' ? 'text/csv' : 'application/json' };
+  const headers = { Accept: format === 'text' ? 'text/csv' : format === 'binary' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/json' };
   if (session.token) headers.Authorization = 'Bearer ' + session.token;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const controller = new AbortController();
@@ -50,6 +50,7 @@ export async function api(session, path, body, format = 'json') {
       error.status = response.status;
       throw error;
     }
+    if (format === 'binary') return new Uint8Array(await response.arrayBuffer());
     return format === 'text' ? await response.text() : await response.json();
   } finally {
     clearTimeout(timeout);

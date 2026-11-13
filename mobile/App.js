@@ -113,6 +113,7 @@ function Login({ onLogin, initialAddress }) {
 function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
   const dates = daysInWeek(day);
   const month = day.slice(0, 7);
+  const special = data.calendar?.find(entry => entry.date === day);
   function changeMonth(direction) {
     const first = month + '-01';
     const target = direction < 0 ? offsetDay(first, -1).slice(0, 7) + '-01' : offsetDay(first, 32).slice(0, 7) + '-01';
@@ -137,7 +138,7 @@ function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
       {data.lock && <Text style={styles.lock}>Месяц закрыт · {data.lock.closed_by}</Text>}
       {data.user.role !== 'worker' && (
         <View style={styles.actions}>
-          <Button title="Выгрузить CSV" disabled={busy} onPress={onShare} />
+          <Button title="Выгрузить Excel" disabled={busy} onPress={onShare} />
           {data.user.role === 'hr' && !data.lock &&
             <Button title="Закрыть месяц" disabled={busy || !data.summary.records} onPress={onClose} />}
         </View>
@@ -146,6 +147,7 @@ function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
         <View style={styles.fill}>
           <Text accessibilityRole="header" style={styles.heading}>Смены</Text>
           <Text style={styles.muted}>{dateFormat.format(asDate(day))}</Text>
+          {special && <Text style={styles.muted}>{special.name} · {special.kind === 'holiday' ? '×2' : 'норма 7 ч'}</Text>}
         </View>
         <View style={styles.actions}>
           <Button title="‹" compact label="Предыдущая неделя" onPress={() => setDay(offsetDay(day, -7))}
@@ -197,11 +199,14 @@ function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
       <View style={styles.fill}>
         <Text style={styles.label}>{worker.name}</Text>
         <Text style={styles.muted}>{title}</Text>
-        {shift && <RateBreakdown work={shift} />}
+        {!!shift?.note && <Text style={styles.muted}>Есть комментарий</Text>}
       </View>
-      {!!shift && <Text style={[styles.pill, shift.status === 'closed' && styles.pillClosed]}>
-        {shift.status === 'closed' ? 'Закрыта' : 'Учтена'}
-      </Text>}
+      {!!shift && <View style={styles.shiftRates}>
+        <RateBreakdown work={shift} />
+        <Text style={[styles.pill, shift.status === 'closed' && styles.pillClosed]}>
+          {shift.status === 'closed' ? 'Закрыта' : 'Учтена'}
+        </Text>
+      </View>}
     </>
   );
   if (!shift && !canEdit) return <View style={styles.shiftRow}>{info}</View>;
@@ -316,10 +321,13 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
   const gross = time(end) - time(start) + (overnight ? 1440 : 0);
   const validTime = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
   const net = validTime(start) && validTime(end) && gross <= 1440 ? Math.max(0, gross - Number(pause)) : 0;
+  const rule = data.calendar?.find(entry => entry.date === day)?.kind ??
+    ([0, 6].includes(asDate(day).getUTCDay()) ? 'weekend' : 'regular');
+  const normal = rule === 'holiday' || rule === 'weekend' ? 0 : rule === 'shortened' ? 420 : 480;
+  const overtime = Math.max(0, net - normal);
+  const first = normal ? Math.min(overtime, 120) : 0;
   const previewRates = {
-    regular_minutes: Math.min(net, 480),
-    overtime_15_minutes: Math.min(Math.max(0, net - 480), 120),
-    overtime_20_minutes: Math.max(0, net - 600)
+    regular_minutes: net - overtime, overtime_15_minutes: first, overtime_20_minutes: overtime - first
   };
   async function copy(values) {
     setError('');
@@ -384,7 +392,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
                   <Text style={styles.body}>Перерыв {pause} мин · Учтено {hours(shift.minutes)}</Text>
                   <RateBreakdown work={shift} />
                 </>}
-                {!!note && <Text style={styles.body}>{note}</Text>}
+                {!!note && <><Text style={styles.label}>Комментарий</Text><Text style={styles.body}>{note}</Text></>}
               </View>
             )}
             <ErrorMessage message={error} />
@@ -408,12 +416,70 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
   );
 }
 
+function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
+  const [date, setDate] = useState(data.today);
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState('holiday');
+  const [role, setRole] = useState('worker');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [assigned, setAssigned] = useState([]);
+  const [error, setError] = useState('');
+  const calendar = mode === 'calendar';
+  async function submit() {
+    if (busy) return;
+    setError('');
+    try {
+      if (calendar) await onSave('calendar', { date, name, kind });
+      else await onSave('users', { name, role, username, password, supervisor_ids: assigned, grade: null });
+    } catch (problem) {
+      setError(problem.message);
+    }
+  }
+  return <Modal visible animationType="none" onRequestClose={busy ? undefined : onDismiss}>
+    <SafeAreaView style={styles.screen}>
+      <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.editor}>
+          <Text accessibilityRole="header" style={styles.title}>{calendar ? 'Добавить особую дату' : 'Добавить сотрудника'}</Text>
+          {calendar ? <>
+            <Field label="Дата (ГГГГ-ММ-ДД)" value={date} onChangeText={setDate} maxLength={10} editable={!busy} />
+            <View style={styles.actions}>
+              <Button title="Праздник" selected={kind === 'holiday'} onPress={() => setKind('holiday')} disabled={busy} />
+              <Button title="Предпраздничный" selected={kind === 'shortened'} onPress={() => setKind('shortened')} disabled={busy} />
+            </View>
+            <Field label="Название" value={name} onChangeText={setName} maxLength={120} editable={!busy} />
+          </> : <>
+            <Field label="Фамилия и имя" value={name} onChangeText={setName} maxLength={120} editable={!busy} />
+            <Field label="Логин" value={username} onChangeText={setUsername} maxLength={40} autoCapitalize="none" editable={!busy} />
+            <Field label="Пароль (от 12 символов)" value={password} onChangeText={setPassword} secureTextEntry maxLength={128} editable={!busy} />
+            <Text style={styles.label}>Роль</Text>
+            <View style={styles.actions}>{Object.entries(roles).map(([key, label]) =>
+              <Button key={key} title={label} selected={role === key} onPress={() => setRole(key)} disabled={busy} />)}</View>
+            {role === 'worker' && data.staff.length > 0 && <>
+              <Text style={styles.label}>Руководители</Text>
+              <View style={styles.actions}>{data.staff.map(person =>
+                <Button key={person.id} title={person.name} selected={assigned.includes(person.id)} disabled={busy}
+                  onPress={() => setAssigned(current => current.includes(person.id)
+                    ? current.filter(id => id !== person.id) : [...current, person.id])} />)}</View>
+            </>}
+          </>}
+          <ErrorMessage message={error} />
+          <Button title={busy ? 'Сохраняем…' : 'Сохранить'} primary onPress={submit} disabled={busy ||
+            (calendar ? !date.trim() || (kind === 'holiday' && !name.trim()) : !name.trim() || !username.trim() || password.length < 12)} />
+          <Button title="Отмена" onPress={onDismiss} disabled={busy} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  </Modal>;
+}
+
 function Workspace({ session, onLogout }) {
   const [data, setData] = useState(null);
   const [day, setDay] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [item, setItem] = useState(null);
+  const [directoryMode, setDirectoryMode] = useState(null);
 
   async function refresh(target = day, updateDay = true) {
     const result = await api(session, 'tabel' + (target ? '?month=' + target.slice(0, 7) : ''));
@@ -477,19 +543,34 @@ function Workspace({ session, onLogout }) {
 
   async function share() {
     if (!await Sharing.isAvailableAsync()) throw new Error('Отправка файла на этом устройстве недоступна.');
-    const contents = await api(session, 'export?month=' + data.month, undefined, 'text');
+    const contents = await api(session, 'export.xlsx?month=' + data.month, undefined, 'binary');
     const directory = new Directory(Paths.cache, 'tabel-exports');
     directory.create({ idempotent: true });
     const now = Date.now();
     for (const previous of directory.list()) {
-      const stamp = Number(previous.name.match(/-(\d+)\.csv$/)?.[1]);
+      const stamp = Number(previous.name.match(/-(\d+)\.(?:xlsx|csv)$/)?.[1]);
       if (stamp && now - stamp > 24 * 60 * 60 * 1000) previous.delete();
     }
     // The selected app may read the shared file after the chooser closes.
-    const file = new File(directory, 'tabel-' + data.month + '-' + now + '.csv');
+    const file = new File(directory, 'tabel-' + data.month + '-' + now + '.xlsx');
     file.create();
     file.write(contents);
-    await Sharing.shareAsync(file.uri, { mimeType: 'text/csv', dialogTitle: 'Выгрузка табеля', UTI: 'public.comma-separated-values-text' });
+    await Sharing.shareAsync(file.uri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Выгрузка табеля', UTI: 'org.openxmlformats.spreadsheetml.sheet' });
+  }
+
+  async function saveDirectory(path, values) {
+    setBusy(true);
+    setError('');
+    try {
+      await api(session, path, values);
+      setDirectoryMode(null);
+      try { await refresh(); } catch (problem) { setError(problem.message); }
+    } catch (problem) {
+      if (problem.status === 401) await onLogout(false);
+      throw problem;
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!data || !day) return <View style={styles.loading}>
@@ -518,6 +599,10 @@ function Workspace({ session, onLogout }) {
         ListHeaderComponent={
           <>
             <ErrorMessage message={error} />
+            {data.user.role === 'hr' && <View style={styles.actions}>
+              <Button title="Добавить сотрудника" disabled={busy} onPress={() => setDirectoryMode('worker')} />
+              <Button title="Добавить особую дату" disabled={busy} onPress={() => setDirectoryMode('calendar')} />
+            </View>}
             <MonthHeader data={data} day={day} setDay={selectDay} busy={busy} onClose={confirmClose}
               onShare={() => run(share)} />
           </>
@@ -529,6 +614,8 @@ function Workspace({ session, onLogout }) {
             canEdit={data.canEdit} onOpen={() => { if (!busy) setItem({ worker, shift, day }); }} />;
         }}
       />
+      {directoryMode && <DirectoryEditor data={data} mode={directoryMode} busy={busy}
+        onSave={saveDirectory} onDismiss={() => setDirectoryMode(null)} />}
       {item && <ShiftEditor item={item} data={data} onDismiss={() => setItem(null)} onSave={values => save('shifts', values)}
         onFill={values => save('shifts/fill', values)}
         onHistory={id => api(session, 'shifts/' + id + '/history')} />}
@@ -621,6 +708,7 @@ const styles = StyleSheet.create({
   editor: { width: '100%', maxWidth: 600, alignSelf: 'center', padding: 20, gap: 12 },
   projectLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   projectDot: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: colors.border },
+  shiftRates: { alignItems: 'flex-end', gap: 3 },
   rate: { color: '#243f64', fontSize: 13, fontWeight: '700' },
   rate15: { color: '#813509' },
   rate20: { color: '#8c1e35' },

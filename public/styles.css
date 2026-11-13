@@ -258,3 +258,19 @@ input[type=color] { width: 78px; height: 46px; padding: 5px; cursor: pointer }
 @media (max-width: 860px) {
   #fill-hint { display: none }
 }
+
+.shift-cell:has(.shift-rates) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 3px; text-align: left; }
+.shift-main { display: flex; flex-direction: column; min-width: 0; align-items: flex-start; }
+.shift-rates { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; text-align: right; }
+.shift-cell .shift-rates .rate-badge { font-size: .66rem; padding-inline: 2px; }
+.shift-cell .shift-rates { max-width: 48px; }
+.comment-mark { color: var(--muted); display: inline-flex; align-items: center; gap: 3px; }
+.comment-mark [data-icon] { width: 14px; height: 14px; flex-basis: 14px; }
+.calendar-tag { display: block; font-size: .62rem; margin-top: 2px; }
+.calendar-tag.holiday { color: #244c88; }
+.calendar-tag.shortened { color: #814210; }
+.day-selector button[aria-pressed="true"] .calendar-tag { color: white; }
+#calendar-period { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+@media (max-width: 860px) {
+  .hr-view .sidebar nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+}

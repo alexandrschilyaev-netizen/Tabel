@@ -44,6 +44,7 @@
       <nav id="navigation" aria-label="Разделы">
         <button data-page="tabel" aria-current="page"><span data-icon="calendar"></span>Табель</button>
         <button data-page="workers"><span data-icon="users"></span>Сотрудники</button>
+        <button data-page="calendar" hidden><span data-icon="calendar"></span>Праздники</button>
         <button data-page="projects"><span data-icon="building"></span>Объекты</button>
       </nav>
       <div class="sidebar-bottom">
@@ -71,7 +72,7 @@
             <div><h1 id="page-title">Табель рабочего времени</h1><p id="period-caption"></p></div>
             <div class="heading-actions">
               <button type="button" id="close-month" hidden><span data-icon="check"></span>Закрыть месяц</button>
-              <a id="export" class="button"><span data-icon="download"></span>Выгрузить CSV</a>
+              <a id="export" class="button"><span data-icon="download"></span>Выгрузить Excel</a>
               <button type="button" id="add-shift" class="primary"><span data-icon="plus"></span>Добавить смену</button>
             </div>
           </div>
@@ -105,6 +106,7 @@
             <div><h1 id="directory-title"></h1><p id="directory-caption"></p></div>
             <button type="button" id="add-directory" class="primary"><span data-icon="plus"></span><span id="directory-add-label"></span></button>
           </div>
+          <label id="calendar-period" hidden>Год <select id="calendar-year"></select></label>
           <div id="directory" class="panel directory"></div>
         </section>
       </main>
