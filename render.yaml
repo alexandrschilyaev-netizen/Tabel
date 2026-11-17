@@ -1,0 +1,27 @@
+# This configuration provisions paid compute and a persistent disk.
+# Confirm the displayed Render pricing before creating the Blueprint.
+services:
+  - type: web
+    name: tabel-rustore-test
+    runtime: node
+    plan: 0.5c-512mb
+    region: frankfurt
+    branch: deployment/temporary-https
+    buildCommand: node --check src/start-test-server.js
+    startCommand: node src/start-test-server.js
+    healthCheckPath: /healthz
+    disk:
+      name: tabel-test-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: NODE_ENV
+        value: production
+      - key: TABEL_HOST
+        value: 0.0.0.0
+      - key: TABEL_DB
+        value: /var/data/tabel-test.sqlite
+      - key: TABEL_TEST_USERS
+        sync: false
