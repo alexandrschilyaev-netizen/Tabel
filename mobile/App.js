@@ -6,7 +6,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { api, clearSession, readSession, saveSession, validateAddress } from './api';
+import { api, clearSession, readSession, saveSession, serverAddress } from './api';
 
 const roles = { worker: 'Монтажник', master: 'Мастер', foreman: 'Прораб', engineer: 'Инженер', hr: 'Кадровик' };
 const kinds = { work: 'Работа', vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Выходной' };
@@ -19,7 +19,10 @@ function hours(minutes) {
   if (minutes > 0 && minutes < 60) return minutes + ' мин';
   return Math.floor(minutes / 60) + ' ч' + (minutes % 60 ? ' ' + minutes % 60 + ' мин' : '');
 }
-const defaultAddress = process.env.EXPO_PUBLIC_TABEL_URL ?? '';
+const weldingTypes = [
+  { key: 'welding', label: 'Сварка', color: '#c65513' },
+  { key: 'zinc_welding', label: 'Сварка цинк', color: '#6840b3' }
+];
 
 function offsetDay(day, offset) {
   const date = asDate(day);
@@ -68,8 +71,7 @@ function ErrorMessage({ message }) {
   return <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{message}</Text>;
 }
 
-function Login({ onLogin, initialAddress }) {
-  const [address, setAddress] = useState(initialAddress || defaultAddress);
+function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,10 +81,9 @@ function Login({ onLogin, initialAddress }) {
     setBusy(true);
     setError('');
     try {
-      const server = validateAddress(address);
-      const auth = await api({ address: server }, 'login', { username: username.trim(), password });
+      const auth = await api({}, 'login', { username: username.trim(), password });
       if (!auth.token || !auth.expires) throw new Error('Сервер не поддерживает вход из мобильного приложения.');
-      await onLogin({ address: server, token: auth.token, expires: auth.expires });
+      await onLogin({ address: serverAddress, token: auth.token, expires: auth.expires });
     } catch (problem) {
       setError(problem.message);
     } finally {
@@ -95,15 +96,13 @@ function Login({ onLogin, initialAddress }) {
         <View style={styles.loginCard}>
           <Text style={styles.brandName}>Табель</Text>
           <Text accessibilityRole="header" style={styles.title}>Вход в приложение</Text>
-          <Field label="Адрес сервера" value={address} onChangeText={setAddress} autoCapitalize="none"
-            autoCorrect={false} keyboardType="url" placeholder="https://tabel.example.org" />
           <Field label="Логин" value={username} onChangeText={setUsername} autoCapitalize="none"
             autoCorrect={false} autoComplete="username" maxLength={40} />
           <Field label="Пароль" value={password} onChangeText={setPassword} autoComplete="current-password"
             secureTextEntry maxLength={128} onSubmitEditing={submit} />
           <ErrorMessage message={error} />
           <Button title={busy ? 'Входим…' : 'Войти'} primary onPress={submit}
-            disabled={busy || !address.trim() || !username.trim() || !password} />
+            disabled={busy || !username.trim() || !password} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -133,7 +132,12 @@ function MonthHeader({ data, day, setDay, busy, onClose, onShare }) {
       <View style={styles.metrics}>
         <View style={styles.metric}><Text style={styles.muted}>Учтено за месяц</Text><Text style={styles.metricValue}>{hours(data.summary.minutes)}</Text>
           <Text style={styles.muted}>{rateText(data.summary)}</Text></View>
-        <View style={styles.metric}><Text style={styles.muted}>Рабочих смен</Text><Text style={styles.metricValue}>{data.summary.workShifts}</Text></View>
+        <View style={styles.metric}><Text style={styles.muted}>Рабочих смен</Text><Text style={styles.metricValue}>{data.summary.workShifts}</Text>
+          {weldingTypes.map(({ key, label, color }) => <View key={key} style={styles.projectLine}>
+            <View style={[styles.weldingDot, { backgroundColor: color }]} />
+            <Text style={styles.muted}>{label} · {data.summary[key + '_days'] ?? 0}</Text>
+          </View>)}
+        </View>
       </View>
       {data.lock && <Text style={styles.lock}>Месяц закрыт · {data.lock.closed_by}</Text>}
       {data.user.role !== 'worker' && (
@@ -188,6 +192,16 @@ function RateBreakdown({ work }) {
   ));
 }
 
+function WeldingMarks({ shift, labels = false }) {
+  const marks = weldingTypes.filter(({ key }) => shift?.[key]);
+  if (!marks.length) return null;
+  return <View style={styles.actions}>{marks.map(({ key, label, color }) =>
+    <View key={key} style={styles.projectLine} accessible accessibilityLabel={label}>
+      <View style={[styles.weldingDot, { backgroundColor: color }]} />
+      {labels && <Text style={styles.muted}>{label}</Text>}
+    </View>)}</View>;
+}
+
 function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
   const title = !shift ? (canEdit ? 'Добавить смену' : 'Нет записи') :
     shift.kind === 'work' ? hours(shift.minutes) + ' · ' + (project?.name ?? '') : kinds[shift.kind];
@@ -203,6 +217,7 @@ function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
       </View>
       {!!shift && <View style={styles.shiftRates}>
         <RateBreakdown work={shift} />
+        <WeldingMarks shift={shift} />
         <Text style={[styles.pill, shift.status === 'closed' && styles.pillClosed]}>
           {shift.status === 'closed' ? 'Закрыта' : 'Учтена'}
         </Text>
@@ -282,6 +297,9 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
   const [pause, setPause] = useState(String(shift?.break_minutes ?? 0));
   const [overnight, setOvernight] = useState(Boolean(shift?.overnight));
   const [note, setNote] = useState(shift?.note ?? '');
+  const [marks, setMarks] = useState(() => Object.fromEntries(
+    weldingTypes.map(({ key }) => [key, Boolean(shift?.[key])])
+  ));
   const [history, setHistory] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -295,7 +313,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
     try {
       await onSave({
         worker_id: worker.id, date: day, version: shift?.version ?? 0, kind, project_id: project,
-        start, end, overnight, break_minutes: Number(pause), note
+        start, end, overnight, break_minutes: Number(pause), note, ...marks
       });
     } catch (problem) {
       setError(problem.message);
@@ -372,6 +390,15 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
                       keyboardType="number-pad" maxLength={4} editable={!busy} />
                     <Button title="Конец смены на следующий день" selected={overnight}
                       onPress={() => setOvernight(!overnight)} disabled={busy} />
+                    <Text style={styles.label}>Виды сварки</Text>
+                    <View style={styles.actions}>{weldingTypes.map(({ key, label, color }) =>
+                      <Pressable key={key} accessibilityRole="checkbox" accessibilityState={{ checked: marks[key], disabled: busy }}
+                        disabled={busy} style={styles.button}
+                        onPress={() => setMarks(current => ({ ...current, [key]: !current[key] }))}>
+                        <Text style={styles.buttonText}>{marks[key] ? '☑' : '☐'}</Text>
+                        <View style={[styles.weldingDot, { backgroundColor: color }]} />
+                        <Text style={styles.buttonText}>{label}</Text>
+                      </Pressable>)}</View>
                     <RateBreakdown work={previewRates} />
                   </>
                 )}
@@ -391,6 +418,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
                   <Text style={styles.body}>{start}–{end}{overnight ? ' (+1 день)' : ''}</Text>
                   <Text style={styles.body}>Перерыв {pause} мин · Учтено {hours(shift.minutes)}</Text>
                   <RateBreakdown work={shift} />
+                  <WeldingMarks shift={shift} labels />
                 </>}
                 {!!note && <><Text style={styles.label}>Комментарий</Text><Text style={styles.body}>{note}</Text></>}
               </View>
@@ -416,14 +444,15 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
   );
 }
 
-function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
+function DirectoryEditor({ data, mode, employee, busy, onSave, onDismiss }) {
   const [date, setDate] = useState(data.today);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(employee?.name ?? '');
   const [kind, setKind] = useState('holiday');
-  const [role, setRole] = useState('worker');
-  const [username, setUsername] = useState('');
+  const [role, setRole] = useState(employee?.role ?? 'worker');
+  const [username, setUsername] = useState(employee?.username ?? '');
   const [password, setPassword] = useState('');
-  const [assigned, setAssigned] = useState([]);
+  const [grade, setGrade] = useState(String(employee?.grade ?? ''));
+  const [assigned, setAssigned] = useState(data.workers.find(worker => worker.id === employee?.id)?.supervisor_ids ?? []);
   const [error, setError] = useState('');
   const calendar = mode === 'calendar';
   async function submit() {
@@ -431,7 +460,7 @@ function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
     setError('');
     try {
       if (calendar) await onSave('calendar', { date, name, kind });
-      else await onSave('users', { name, role, username, password, supervisor_ids: assigned, grade: null });
+      else await onSave(employee ? 'users/' + employee.id : 'users', { name, role, username, password, supervisor_ids: assigned, grade: grade ? Number(grade) : null });
     } catch (problem) {
       setError(problem.message);
     }
@@ -440,7 +469,7 @@ function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
     <SafeAreaView style={styles.screen}>
       <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.editor}>
-          <Text accessibilityRole="header" style={styles.title}>{calendar ? 'Добавить особую дату' : 'Добавить сотрудника'}</Text>
+          <Text accessibilityRole="header" style={styles.title}>{calendar ? 'Добавить особую дату' : employee ? 'Изменить сотрудника' : 'Добавить сотрудника'}</Text>
           {calendar ? <>
             <Field label="Дата (ГГГГ-ММ-ДД)" value={date} onChangeText={setDate} maxLength={10} editable={!busy} />
             <View style={styles.actions}>
@@ -451,10 +480,12 @@ function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
           </> : <>
             <Field label="Фамилия и имя" value={name} onChangeText={setName} maxLength={120} editable={!busy} />
             <Field label="Логин" value={username} onChangeText={setUsername} maxLength={40} autoCapitalize="none" editable={!busy} />
-            <Field label="Пароль (от 12 символов)" value={password} onChangeText={setPassword} secureTextEntry maxLength={128} editable={!busy} />
+            <Field label={employee ? "Новый пароль (необязательно)" : "Пароль (от 12 символов)"} value={password} onChangeText={setPassword} secureTextEntry maxLength={128} editable={!busy} />
             <Text style={styles.label}>Роль</Text>
-            <View style={styles.actions}>{Object.entries(roles).map(([key, label]) =>
-              <Button key={key} title={label} selected={role === key} onPress={() => setRole(key)} disabled={busy} />)}</View>
+            {employee ? <Text style={styles.body}>{roles[role]}</Text> : <View style={styles.actions}>{Object.entries(roles).map(([key, label]) =>
+              <Button key={key} title={label} selected={role === key} onPress={() => setRole(key)} disabled={busy} />)}</View>}
+            {role === 'worker' && <Field label="Разряд (1–8)" value={grade} onChangeText={value => setGrade(value.replace(/\D/g, ''))}
+              keyboardType="number-pad" maxLength={1} editable={!busy} />}
             {role === 'worker' && data.staff.length > 0 && <>
               <Text style={styles.label}>Руководители</Text>
               <View style={styles.actions}>{data.staff.map(person =>
@@ -465,7 +496,7 @@ function DirectoryEditor({ data, mode, busy, onSave, onDismiss }) {
           </>}
           <ErrorMessage message={error} />
           <Button title={busy ? 'Сохраняем…' : 'Сохранить'} primary onPress={submit} disabled={busy ||
-            (calendar ? !date.trim() || (kind === 'holiday' && !name.trim()) : !name.trim() || !username.trim() || password.length < 12)} />
+            (calendar ? !date.trim() || (kind === 'holiday' && !name.trim()) : !name.trim() || !username.trim() || ((!employee || password.length > 0) && password.length < 12))} />
           <Button title="Отмена" onPress={onDismiss} disabled={busy} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -600,7 +631,7 @@ function Workspace({ session, onLogout }) {
           <>
             <ErrorMessage message={error} />
             {data.user.role === 'hr' && <View style={styles.actions}>
-              <Button title="Добавить сотрудника" disabled={busy} onPress={() => setDirectoryMode('worker')} />
+              <Button title="Сотрудники" disabled={busy} onPress={() => setDirectoryMode('employees')} />
               <Button title="Добавить особую дату" disabled={busy} onPress={() => setDirectoryMode('calendar')} />
             </View>}
             <MonthHeader data={data} day={day} setDay={selectDay} busy={busy} onClose={confirmClose}
@@ -614,8 +645,22 @@ function Workspace({ session, onLogout }) {
             canEdit={data.canEdit} onOpen={() => { if (!busy) setItem({ worker, shift, day }); }} />;
         }}
       />
-      {directoryMode && <DirectoryEditor data={data} mode={directoryMode} busy={busy}
-        onSave={saveDirectory} onDismiss={() => setDirectoryMode(null)} />}
+      {directoryMode === 'employees' && <Modal visible onRequestClose={() => setDirectoryMode(null)}>
+        <SafeAreaView style={styles.screen}>
+          <FlatList data={data.employees ?? []} keyExtractor={employee => String(employee.id)}
+            contentContainerStyle={styles.list}
+            ListHeaderComponent={<View style={styles.stack}>
+              <Text accessibilityRole="header" style={styles.title}>Сотрудники</Text>
+              <Button title="Добавить сотрудника" primary onPress={() => setDirectoryMode('worker')} />
+              <Button title="Закрыть" onPress={() => setDirectoryMode(null)} />
+            </View>}
+            renderItem={({ item: employee }) => <Button title={employee.name + ' · ' + roles[employee.role]}
+              label={'Изменить сотрудника ' + employee.name} onPress={() => setDirectoryMode(employee)} />} />
+        </SafeAreaView>
+      </Modal>}
+      {directoryMode && directoryMode !== 'employees' && <DirectoryEditor data={data} mode={directoryMode}
+        employee={typeof directoryMode === 'object' ? directoryMode : null} busy={busy}
+        onSave={saveDirectory} onDismiss={() => setDirectoryMode(directoryMode === 'calendar' ? null : 'employees')} />}
       {item && <ShiftEditor item={item} data={data} onDismiss={() => setItem(null)} onSave={values => save('shifts', values)}
         onFill={values => save('shifts/fill', values)}
         onHistory={id => api(session, 'shifts/' + id + '/history')} />}
@@ -625,21 +670,18 @@ function Workspace({ session, onLogout }) {
 
 export default function App() {
   const [session, setSession] = useState(null);
-  const [address, setAddress] = useState('');
   const [ready, setReady] = useState(false);
   useEffect(() => {
     readSession().then(previous => {
-      if (previous?.address) setAddress(previous.address);
       if (previous?.token) setSession(previous);
     }).catch(() => {}).finally(() => setReady(true));
   }, []);
   async function login(auth) {
     await saveSession(auth);
-    setAddress(auth.address);
     setSession(auth);
   }
   async function logout(notifyServer = true) {
-    await clearSession(session.address);
+    await clearSession();
     setSession(null);
     if (notifyServer) await api(session, 'logout', {}).catch(() => {});
   }
@@ -649,7 +691,7 @@ export default function App() {
         <StatusBar barStyle="dark-content" />
         {!ready ? <View style={styles.loading}><ActivityIndicator size="large" color={colors.primary} /></View> :
           session ? <Workspace session={session} onLogout={logout} /> :
-            <Login onLogin={login} initialAddress={address} />}
+            <Login onLogin={login} />}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -685,7 +727,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.5 },
   error: { borderRadius: 10, padding: 10, backgroundColor: colors.redBg, color: colors.red, fontSize: 15 },
-  header: { backgroundColor: colors.nav, paddingHorizontal: 16, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  header: { backgroundColor: colors.nav, paddingHorizontal: 16, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerName: { color: colors.surface, fontSize: 15, fontWeight: '700' },
   headerRole: { color: colors.navText, fontSize: 13 },
   list: { padding: 16, width: '100%', maxWidth: 720, alignSelf: 'center', gap: 8 },
@@ -708,6 +750,7 @@ const styles = StyleSheet.create({
   editor: { width: '100%', maxWidth: 600, alignSelf: 'center', padding: 20, gap: 12 },
   projectLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   projectDot: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: colors.border },
+  weldingDot: { width: 9, height: 9, borderRadius: 5 },
   shiftRates: { alignItems: 'flex-end', gap: 3 },
   rate: { color: '#243f64', fontSize: 13, fontWeight: '700' },
   rate15: { color: '#813509' },

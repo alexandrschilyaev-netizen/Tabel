@@ -1,4 +1,4 @@
-# Табель рабочего времени · 0.4.0
+# Табель рабочего времени · 0.5.0
 
 В проект входят веб-версия для ПК и мобильных браузеров, сервер и отдельный мобильный клиент на React Native для Android и iOS. Браузер и приложения используют одни и те же учётные записи и общую базу SQLite. Для работы с табелем нужна связь с сервером.
 
@@ -115,4 +115,4 @@ npx eas-cli@latest build --platform android --profile preview
 npx eas-cli@latest build --platform all --profile production
 ```
 
-Профиль `preview` для Android формирует APK для установки на тестовое устройство. Профиль `production` готовит Android App Bundle и сборку iOS для магазинов. Для публикации потребуется настройка подписи и доступ к Google Play Console и Apple Developer / App Store Connect. Введите адрес сервера при входе или задайте его в окружении сборки через `EXPO_PUBLIC_TABEL_URL`.
+Профиль `preview` для Android формирует APK для установки на тестовое устройство. Профиль `production` готовит Android App Bundle и сборку iOS для магазинов. Для публикации потребуется настройка подписи и доступ к Google Play Console и Apple Developer / App Store Connect. Поставляемое приложение подключается к серверу Amvera по HTTPS. Адрес задан в `mobile/api.js`.

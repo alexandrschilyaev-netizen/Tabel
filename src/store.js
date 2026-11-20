@@ -133,6 +133,12 @@ export function openStore(demo = false) {
     if (!db.prepare('PRAGMA table_info(month_locks)').all().some(column => column.name === 'calendar_policy')) {
       db.exec('ALTER TABLE month_locks ADD COLUMN calendar_policy INTEGER NOT NULL DEFAULT 0;');
     }
+    const shiftColumns = new Set(db.prepare('PRAGMA table_info(shifts)').all().map(column => column.name));
+    for (const column of ['welding', 'zinc_welding']) {
+      if (!shiftColumns.has(column)) {
+        db.exec(`ALTER TABLE shifts ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0 CHECK(${column} IN (0,1));`);
+      }
+    }
     const marker = db.prepare("INSERT OR IGNORE INTO app_migrations VALUES('legacy_holidays_2026')").run();
     if (marker.changes) {
       const insert = db.prepare("INSERT OR IGNORE INTO calendar_days(date,kind,name) VALUES(?,'holiday',?)");

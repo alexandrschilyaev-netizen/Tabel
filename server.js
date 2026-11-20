@@ -141,6 +141,8 @@ function monthSummary(shifts, workers, calendar) {
   const signature = shifts.map(shift => shift.id + ':' + shift.version).join(',') + '|' + workers.map(worker => worker.id).join(',') + '|' + JSON.stringify(calendar);
   return {
     records: shifts.length,
+    welding_days: shifts.filter(shift => shift.welding).length,
+    zinc_welding_days: shifts.filter(shift => shift.zinc_welding).length,
     workShifts: shifts.filter(shift => shift.kind === 'work').length,
     minutes: shifts.reduce((sum, shift) => sum + shift.minutes, 0),
     regular_minutes: shifts.reduce((sum, shift) => sum + shift.regular_minutes, 0),
@@ -172,6 +174,7 @@ function data(user, month) {
   const projects = user.role === 'worker' ? allProjects.filter(project => projectIds.has(project.id)) : allProjects;
   const hr = user.role === 'hr';
   const staff = hr ? db.prepare("SELECT id,name,role FROM users WHERE role IN ('master','foreman','engineer') ORDER BY name").all() : [];
+  const employees = hr ? db.prepare('SELECT id,username,name,role,grade FROM users ORDER BY name').all() : [];
   if (hr) {
     const workerById = new Map(workers.map(worker => [worker.id, worker]));
     workers.forEach(worker => { worker.supervisor_ids = []; });
@@ -180,7 +183,7 @@ function data(user, month) {
     }
   }
   return {
-    user: { id: user.id, name: user.name, role: user.role }, today: localDate(), workers, shifts, projects, staff,
+    user: { id: user.id, name: user.name, role: user.role }, today: localDate(), workers, shifts, projects, staff, employees,
     month, lock, calendar, summary: monthSummary(shifts, workers, calendar), canEdit: !lock && user.role !== 'worker', demo
   };
 }
@@ -238,14 +241,22 @@ function writeShift(user, cell, values, { replace = true, source = null } = {}) 
   requireThat((current?.version ?? 0) === cell.version, 409, 'Табель изменился. Обновите его и повторите действие.');
   requireThat(!current || replace, 409, 'В диапазоне уже есть записи. Подтвердите их замену.');
   requireThat(current?.status !== 'closed', 409, 'В диапазоне есть закрытая смена.');
+  const work = values[1] === 'work';
+  const marks = ['welding', 'zinc_welding'].map(key => {
+    if (!work) return 0;
+    if (source) return source[key];
+    if (cell[key] === undefined) return current?.[key] ?? 0;
+    requireThat(typeof cell[key] === 'boolean', 400, 'Проверьте отметки сварки.');
+    return Number(cell[key]);
+  });
   const note = source ? (current?.note ?? '') : cell.note.trim();
   let saved;
   if (current) {
-    saved = db.prepare(`UPDATE shifts SET project_id=?,kind=?,start=?,end=?,overnight=?,break_minutes=?,minutes=?,note=?,
-      version=version+1 WHERE id=? RETURNING *`).get(...values, note, current.id);
+    saved = db.prepare(`UPDATE shifts SET project_id=?,kind=?,start=?,end=?,overnight=?,break_minutes=?,minutes=?,note=?,welding=?,zinc_welding=?,
+      version=version+1 WHERE id=? RETURNING *`).get(...values, note, ...marks, current.id);
   } else {
-    saved = db.prepare(`INSERT INTO shifts(worker_id,date,project_id,kind,start,end,overnight,break_minutes,minutes,note,status)
-      VALUES(?,?,?,?,?,?,?,?,?,?,'approved') RETURNING *`).get(cell.worker_id, cell.date, ...values, note);
+    saved = db.prepare(`INSERT INTO shifts(worker_id,date,project_id,kind,start,end,overnight,break_minutes,minutes,note,welding,zinc_welding,status)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'approved') RETURNING *`).get(cell.worker_id, cell.date, ...values, note, ...marks);
   }
   logShift(saved.id, user.id, source ? 'filled' : current ? 'edited' : 'created', source?.date ?? null);
   return withOvertime(saved, dayRule(saved.date, db.prepare('SELECT kind FROM calendar_days WHERE date=?').get(saved.date)));
@@ -384,26 +395,42 @@ function writeAssignments(worker, ids) {
   ids.forEach(id => add.run(worker, id));
 }
 
-async function createUser(res, body) {
-  const { username, name, role, password, grade } = body;
+async function saveUser(res, body, actor, id = null) {
+  const { username, name, password, grade } = body;
+  const existing = id === null ? null : db.prepare('SELECT role FROM users WHERE id=?').get(id);
+  requireThat(id === null || existing, 404, 'Сотрудник не найден.');
+  const role = existing?.role ?? body.role;
   requireThat(typeof username === 'string' && /^[a-z0-9._-]{3,40}$/i.test(username) && Object.hasOwn(roles, role), 400, 'Укажите роль и логин из 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний.');
   requireThat(typeof name === 'string' && name.trim().length > 1 && name.trim().length <= 120, 400, 'Укажите имя сотрудника.');
-  requireThat(typeof password === 'string' && password.length >= 12 && password.length <= 128, 400, 'Пароль должен содержать от 12 до 128 символов.');
+  const keepPassword = existing && (password === undefined || password === '');
+  requireThat(keepPassword || (typeof password === 'string' && password.length >= 12 && password.length <= 128), 400, 'Пароль должен содержать от 12 до 128 символов.');
   const worker = role === 'worker';
   requireThat(!worker || grade === null || (Number.isInteger(grade) && grade >= 1 && grade <= 8), 400, 'Укажите разряд от 1 до 8.');
-  const hash = await hashPassword(password);
+  const hash = keepPassword ? null : await hashPassword(password);
   try {
     transaction(() => {
-      const ids = worker ? validateAssignments(body.supervisor_ids ?? []) : [];
-      const result = db.prepare('INSERT INTO users(username,name,role,password,grade) VALUES(?,?,?,?,?)')
-        .run(username, name.trim(), role, hash, worker ? grade : null);
-      if (worker) writeAssignments(result.lastInsertRowid, ids);
+      const ids = worker && (!existing || body.supervisor_ids !== undefined)
+        ? validateAssignments(body.supervisor_ids ?? []) : null;
+      if (existing) {
+        db.prepare('UPDATE users SET username=?,name=?,grade=?,password=COALESCE(?,password) WHERE id=?')
+          .run(username, name.trim(), worker ? grade : null, hash, id);
+        if (hash) {
+          for (const table of ['sessions', 'mobile_sessions']) {
+            db.prepare(`DELETE FROM ${table} WHERE user_id=? AND digest<>?`).run(id, actor.digest);
+          }
+        }
+        if (ids) writeAssignments(id, ids);
+      } else {
+        const result = db.prepare('INSERT INTO users(username,name,role,password,grade) VALUES(?,?,?,?,?)')
+          .run(username, name.trim(), role, hash, worker ? grade : null);
+        if (ids) writeAssignments(result.lastInsertRowid, ids);
+      }
     });
   } catch (error) {
     if (String(error.message).includes('UNIQUE constraint failed')) throw new HttpError(409, 'Этот логин уже используется.');
     throw error;
   }
-  return json(res, { ok: true }, 201);
+  return json(res, { ok: true }, existing ? 200 : 201);
 }
 
 function updateAssignments(user, worker, ids) {
@@ -517,10 +544,11 @@ async function handle(req, res) {
       JOIN users u ON u.id=e.actor_id WHERE e.shift_id=? ORDER BY e.id DESC LIMIT 50`).all(id));
   }
   const projectPath = path.match(/^\/api\/projects(?:\/(\d+))?$/);
-  if (method === 'POST' && (path === '/api/users' || projectPath)) {
+  const userPath = path.match(/^\/api\/users(?:\/(\d+))?$/);
+  if (method === 'POST' && (userPath || projectPath)) {
     requireThat(user.role === 'hr', 403, 'Действие доступно кадровику.');
     const body = await readJson(req);
-    return projectPath ? saveProject(res, body, projectPath[1] ? Number(projectPath[1]) : null) : createUser(res, body);
+    return projectPath ? saveProject(res, body, projectPath[1] ? Number(projectPath[1]) : null) : saveUser(res, body, user, userPath[1] ? Number(userPath[1]) : null);
   }
   throw new HttpError(404, 'Действие не найдено.');
 }

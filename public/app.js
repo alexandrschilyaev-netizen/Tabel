@@ -225,10 +225,10 @@ function render() {
 }
 
 function renderStats() {
-  const { summary, workers, lock, user } = state.data;
+  const { summary, lock, user } = state.data;
   const metrics = [
     ['Учтено за месяц', hours(summary.minutes), rateText(summary) || 'За выбранный месяц', 'clock', ''],
-    ['Рабочих смен', number.format(summary.workShifts), 'Сотрудников: ' + number.format(workers.length), 'calendar', ''],
+    ['Рабочих смен', number.format(summary.workShifts), 'Сварка ' + (summary.welding_days ?? 0) + ' · Сварка цинк ' + (summary.zinc_welding_days ?? 0), 'calendar', ''],
     ['Записей в табеле', number.format(summary.records), 'В том числе отсутствия', 'users', ''],
     ['Статус месяца', lock ? 'Закрыт' : 'Открыт', lock ? 'Просмотр' : 'В работе', 'check', 'approved']
   ];
@@ -237,6 +237,15 @@ function renderStats() {
     '<article class="stat"><div class="stat-head"><span>' + label + '</span><span class="stat-icon ' + tone + '">' + icon(symbol) +
     '</span></div><strong>' + value + '</strong><small>' + detail + '</small></article>'
   ).join('');
+}
+
+const weldingTypes = { welding: 'Сварка', zinc_welding: 'Сварка цинк' };
+
+function weldingDots(shift, labels = false) {
+  const active = Object.entries(weldingTypes).filter(([key]) => shift?.[key]);
+  return active.length ? '<span class="welding-marks">' + active.map(([key, label]) =>
+    '<span class="welding-mark" title="' + label + '"><i class="dot ' + key + '" aria-hidden="true"></i>' +
+    (labels ? label : '<span class="sr-only">' + label + '</span>') + '</span>').join('') + '</span>' : '';
 }
 
 function renderSchedule() {
@@ -276,6 +285,7 @@ function renderSchedule() {
   ).join('') + '<th scope="col">Итого</th></tr></thead>';
   const rows = weekWorkers.map((worker, row) => {
     let total = 0;
+    const welding = { welding: 0, zinc_welding: 0 };
     const rates = { regular_minutes: 0, overtime_15_minutes: 0, overtime_20_minutes: 0 };
     const cells = dates.map((date, column) => {
       if (!date.startsWith(state.month)) return '<td>·</td>';
@@ -283,11 +293,12 @@ function renderSchedule() {
       if (filtering && !matches(shift)) return '<td>·</td>';
       if (!shift && !canEdit) return '<td>—</td>';
       total += shift?.minutes ?? 0;
+      for (const key of Object.keys(welding)) welding[key] += Number(Boolean(shift?.[key]));
       for (const key of Object.keys(rates)) rates[key] += shift?.[key] ?? 0;
       const project = projectsById.get(shift?.project_id);
       const work = shift?.kind === 'work';
       const label = shift ? (work ? hours(shift.minutes) + ', ' + (project?.name ?? '') : kinds[shift.kind]) +
-        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) + ' (' + rateText(shift) + ')' : '') + ', ' + statuses[shift.status] + (shift.note ? ', есть комментарий' : '') : 'Добавить смену';
+        (shift.overtime_minutes ? ', переработка ' + hours(shift.overtime_minutes) + ' (' + rateText(shift) + ')' : '') + ', ' + statuses[shift.status] + (shift.note ? ', есть комментарий' : '') + Object.entries(weldingTypes).filter(([key]) => shift[key]).map(([, name]) => ', ' + name).join('') : 'Добавить смену';
       const fillCell = canEdit && !filtering
         ? ' data-fill-row="' + row + '" data-fill-column="' + column + '" data-fill-date="' + date + '"' : '';
       const hasHandle = fillCell && shift && shift.status !== 'closed';
@@ -297,12 +308,15 @@ function renderSchedule() {
         (hasHandle ? ' has-fill' : '') + '" data-worker="' + worker.id + '" data-date="' + date + '"' + colorAttr(project?.color) +
         ' aria-label="' + safe(worker.name + ', ' + dayLabel(date) + ', ' + label) + '" title="' + safe(label) + '">' +
         (work ? '<span class="shift-main"><strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' +
-          (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') + '</span>' +
+          (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') + weldingDots(shift) + '</span>' +
           '<span class="shift-rates">' + rateBadges(shift) + '</span>'
           : shift ? '<small>' + kinds[shift.kind] + '</small>' + (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') : '—') + '</button>' + handle + '</td>';
     }).join('');
     return '<tr><th scope="row">' + person(worker, workerCaption(worker)) + '</th>' + cells +
-      '<td class="week-total">' + hours(total) + '<span class="rate-stack">' + rateBadges(rates) + '</span>' + '</td></tr>';
+      '<td class="week-total">' + hours(total) + '<span class="rate-stack">' + rateBadges(rates) + '</span>' +
+      '<span class="welding-totals">' + Object.entries(weldingTypes).map(([key, label]) =>
+        '<small><i class="dot ' + key + '" aria-hidden="true"></i>' + label + ' <b>' + welding[key] + '</b></small>').join('') +
+      '</span></td></tr>';
   }).join('');
   grid.innerHTML = weekWorkers.length
     ? '<table aria-label="Смены сотрудников за неделю">' + tableHeader + '<tbody>' + rows + '</tbody></table>'
@@ -313,7 +327,7 @@ function renderSchedule() {
     const details = shift
       ? '<strong' + colorAttr(project?.color) + '>' + (shift.kind === 'work' ? hours(shift.minutes) + ' · ' + safe(project?.name) : kinds[shift.kind]) +
         '</strong>' + '<span class="shift-rates">' + rateBadges(shift) + '</span>' +
-        (shift.note ? '<small class="comment-mark">' + icon('note') + 'Есть комментарий</small>' : '') + statusPill(shift.status)
+        weldingDots(shift, true) + (shift.note ? '<small class="comment-mark">' + icon('note') + 'Есть комментарий</small>' : '') + statusPill(shift.status)
       : '<span>' + (canEdit ? 'Добавить смену' : 'Нет записи') + '</span>';
     const content = person(worker, workerCaption(worker)) + '<span class="mobile-shift">' + details + '</span>';
     return shift || canEdit ? '<button class="mobile-row" type="button" data-worker="' + worker.id + '" data-date="' + state.day + '">' +
@@ -332,7 +346,8 @@ function renderDirectory(user) {
   $('#add-directory').hidden = user.role !== 'hr';
   $('#directory-add-label').textContent = workers ? 'Добавить сотрудника' : 'Добавить объект';
   const staff = new Map(state.data.staff.map(person => [person.id, person]));
-  const data = workers ? [...state.data.staff, ...state.data.workers] : state.data.projects;
+  const data = workers ? (user.role === 'hr' ? state.data.employees : state.data.workers) : state.data.projects;
+  const workerData = new Map(state.data.workers.map(worker => [worker.id, worker]));
   const rows = data.map(row => {
     if (!workers) {
       const edit = user.role === 'hr' ? '<button type="button" data-project-edit="' + row.id + '" aria-label="' +
@@ -341,11 +356,13 @@ function renderDirectory(user) {
         ' aria-hidden="true"></span><div><strong>' + safe(row.name) + '</strong>' +
         (row.address ? '<br><small>' + safe(row.address) + '</small>' : '') + '</div></div>' + edit + '</div>';
     }
-    const worker = !row.role;
-    const assigned = row.supervisor_ids?.map(id => staff.get(id)?.name).filter(Boolean).join(', ');
+    const worker = !row.role || row.role === 'worker';
+    const assigned = workerData.get(row.id)?.supervisor_ids?.map(id => staff.get(id)?.name).filter(Boolean).join(', ');
     const caption = worker ? workerCaption(row) + (assigned ? ' · ' + assigned : '') : roles[row.role];
     const assign = worker && user.role === 'hr' ? '<button type="button" data-assign="' + row.id + '">Руководители</button>' : '';
-    return '<div class="directory-row">' + person(row, caption) + assign + '</div>';
+    const edit = user.role === 'hr' ? '<button type="button" data-user-edit="' + row.id + '" aria-label="' +
+      safe('Изменить сотрудника ' + row.name) + '">Изменить</button>' : '';
+    return '<div class="directory-row">' + person(row, caption) + '<span class="directory-actions">' + assign + edit + '</span></div>';
   });
   $('#directory').innerHTML = rows.join('') || '<p class="empty-state">Список пока пуст.</p>';
   paintProjects($('#directory'));
@@ -413,6 +430,9 @@ function openShift(workerId, date) {
     '<div class="form-grid">' + field('Начало', 'start', 'type="time" value="' + (shift?.start ?? '08:00') + '"') +
     field('Конец', 'end', 'type="time" value="' + (shift?.end ?? '17:00') + '"') + '</div>' +
     field('Перерыв, мин', 'pause', 'type="number" inputmode="numeric" min="0" max="1439" value="' + (shift?.break_minutes ?? 0) + '"') +
+    '<fieldset class="welding-fields"><legend>Виды сварки</legend>' + Object.entries(weldingTypes).map(([key, label]) =>
+      '<label class="check"><input type="checkbox" name="' + key + '"' + (shift?.[key] ? ' checked' : '') +
+      '><i class="dot ' + key + '" aria-hidden="true"></i>' + label + '</label>').join('') + '</fieldset>' +
     '<label class="check"><input name="overnight" type="checkbox"' + (shift?.overnight ? ' checked' : '') + '>Смена заканчивается на следующий день</label><p class="rate-preview" data-overtime role="status" hidden></p></div>' +
     '<label>Комментарий<textarea name="note" aria-label="Комментарий" rows="2" maxlength="500">' + safe(shift?.note) + '</textarea></label>' +
     errorMarkup + '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">Сохранить запись</button></div></form>' +
@@ -450,7 +470,8 @@ function openShift(workerId, date) {
   bindForm(form, fields => api('shifts', {
     worker_id: workerId || Number(fields.worker.value), date: date || fields.date.value, kind: fields.kind.value,
     project_id: Number(fields.project.value), start: fields.start.value, end: fields.end.value, overnight: fields.overnight.checked,
-    break_minutes: Number(fields.pause.value), note: fields.note.value, version: shift?.version ?? 0
+    break_minutes: Number(fields.pause.value), note: fields.note.value, version: shift?.version ?? 0,
+    welding: fields.welding.checked, zinc_welding: fields.zinc_welding.checked
   }), 'Запись сохранена.');
   if (shift) bindHistory(shift);
 }
@@ -495,6 +516,7 @@ function openDetails(shift) {
       '</dd></div>' + '<div><dt>Часы по коэффициентам</dt><dd class="rate-stack">' + rateBadges(shift) + '</dd></div>' +
       '<div><dt>Рабочее время</dt><dd>' + shift.start + '–' + shift.end + (shift.overnight ? ' (+1 день)' : '') +
       '</dd></div><div><dt>Перерыв</dt><dd>' + shift.break_minutes + ' мин</dd></div>' : '') +
+    (shift.welding || shift.zinc_welding ? '<div class="wide"><dt>Виды сварки</dt><dd>' + weldingDots(shift, true) + '</dd></div>' : '') +
     (shift.note ? '<div class="wide"><dt>Комментарий</dt><dd>' + safe(shift.note) + '</dd></div>' : '') + '</dl>' +
     historyMarkup());
   bindHistory(shift);
@@ -556,30 +578,33 @@ function openCalendarEditor(day = null, removing = false) {
   }, removing ? 'Дата удалена.' : 'Дата сохранена.');
 }
 
-function openDirectoryEditor(project = null) {
+function openDirectoryEditor(project = null, employee = null) {
   if (state.page === 'calendar') return openCalendarEditor();
   const workers = state.page === 'workers';
   const color = project?.color ?? projectColors.find(value => !state.data.projects.some(item => item.color === value)) ?? projectColors[0];
-  openDialog(workers ? 'Добавление сотрудника' : project ? 'Изменение объекта' : 'Добавление объекта', '', '<form class="editor-form">' +
-    (workers ? field('Фамилия и имя', 'name', 'required maxlength="120" autocomplete="off"') +
-      selectField('Роль', 'role', Object.entries(roles).map(([key, label]) => option(key, label)).join('')) +
-      '<div id="worker-fields">' + field('Разряд', 'grade', 'type="number" min="1" max="8"') + assignmentChoices([]) + '</div>' +
-      field('Логин', 'username', 'required minlength="3" maxlength="40" pattern="[A-Za-z0-9._\\-]+" autocomplete="off"') +
-      field('Пароль (от 12 символов)', 'password', 'type="password" required minlength="12" maxlength="128" autocomplete="new-password"')
+  openDialog(workers ? (employee ? 'Изменение сотрудника' : 'Добавление сотрудника') : project ? 'Изменение объекта' : 'Добавление объекта', '', '<form class="editor-form">' +
+    (workers ? field('Фамилия и имя', 'name', 'required maxlength="120" autocomplete="off" value="' + safe(employee?.name) + '"') +
+      selectField('Роль', 'role', Object.entries(roles).map(([key, label]) => option(key, label, key === employee?.role)).join(''), employee ? 'disabled' : '') +
+      '<div id="worker-fields"' + (employee && employee.role !== 'worker' ? ' hidden' : '') + '>' +
+      field('Разряд', 'grade', 'type="number" min="1" max="8" value="' + (employee?.grade ?? '') + '"') +
+      assignmentChoices(state.data.workers.find(item => item.id === employee?.id)?.supervisor_ids ?? []) + '</div>' +
+      field('Логин', 'username', 'required minlength="3" maxlength="40" autocomplete="off" value="' + safe(employee?.username) + '"') +
+      field(employee ? 'Новый пароль (необязательно)' : 'Пароль (от 12 символов)', 'password',
+        'type="password" minlength="12" maxlength="128" autocomplete="new-password"' + (employee ? '' : ' required'))
       : field('Название', 'name', 'required maxlength="80" value="' + safe(project?.name) + '"') +
       field('Адрес или площадка', 'address', 'maxlength="160" value="' + safe(project?.address) + '"') +
       field('Цвет объекта', 'color', 'type="color" value="' + safe(color) + '"')) +
     errorMarkup + '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">' +
-    (project ? 'Сохранить' : 'Добавить') + '</button></div></form>'
+    (project || employee ? 'Сохранить' : 'Добавить') + '</button></div></form>'
   );
   const form = editor.querySelector('form');
   if (workers) form.elements.role.addEventListener('change', () => { $('#worker-fields').hidden = form.elements.role.value !== 'worker'; });
-  bindForm(form, fields => workers ? api('users', {
+  bindForm(form, fields => workers ? api(employee ? 'users/' + employee.id : 'users', {
     name: fields.name.value, username: fields.username.value, role: fields.role.value, password: fields.password.value,
     supervisor_ids: selectedSupervisors(fields), grade: Number(fields.grade.value) || null
   }) : api(project ? 'projects/' + project.id : 'projects', {
     name: fields.name.value, address: fields.address.value, color: fields.color.value
-  }), workers ? 'Учётная запись добавлена.' : project ? 'Объект изменён.' : 'Объект добавлен.');
+  }), workers ? (employee ? 'Данные сотрудника сохранены.' : 'Учётная запись добавлена.') : project ? 'Объект изменён.' : 'Объект добавлен.');
 }
 
 function lockEditor(locked) {
@@ -883,6 +908,8 @@ $('#directory').addEventListener('click', event => {
   if (calendar) openCalendarEditor(calendarEntries.find(day => day.date === calendar.dataset.calendarEdit));
   const button = event.target.closest('[data-assign]');
   if (button) openAssignments(Number(button.dataset.assign));
+  const userEdit = event.target.closest('[data-user-edit]');
+  if (userEdit) openDirectoryEditor(null, state.data.employees.find(item => item.id === Number(userEdit.dataset.userEdit)));
   const edit = event.target.closest('[data-project-edit]');
   if (edit) openDirectoryEditor(state.data.projects.find(item => item.id === Number(edit.dataset.projectEdit)));
 });

@@ -274,3 +274,32 @@ input[type=color] { width: 78px; height: 46px; padding: 5px; cursor: pointer }
 @media (max-width: 860px) {
   .hr-view .sidebar nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 }
+
+.topbar { min-height: 52px; padding-block: 3px; }
+.topbar .account-avatar { width: 32px; height: 32px; flex-basis: 32px; }
+main { padding-top: 16px; }
+.page-heading { gap: 8px 20px; margin-bottom: 12px; }
+.page-heading h1 { font-size: clamp(1.5rem, 2.6vw, 1.95rem); }
+.page-heading p { margin-top: 3px; }
+.stats { gap: 10px; margin-bottom: 12px; }
+.stat { padding: 8px 12px; }
+.stat-head { min-height: 24px; }
+.stat-icon { width: 26px; height: 26px; flex-basis: 26px; }
+.stat-icon [data-icon] { width: 16px; height: 16px; flex-basis: 16px; }
+.stat strong { font-size: clamp(1.2rem, 2vw, 1.55rem); margin-top: 3px; }
+.stat small { margin-top: 2px; }
+.notice, .connection { padding-block: 6px; margin-bottom: 8px; }
+.shift-cell { aspect-ratio: 1; min-height: 0; overflow: hidden; }
+.shift-main > small:not(.comment-mark) { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.welding-marks, .welding-mark, .directory-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.welding-marks { gap: 6px 10px; }
+.welding-totals { display: grid; justify-items: start; gap: 3px; margin-top: 5px; text-align: left; }
+.welding-totals small { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 3px; font-size: .67rem; line-height: 1.15; width: 100%; }
+.dot.welding { color: #c65513; }
+.dot.zinc_welding { color: #6840b3; }
+.welding-fields { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0 0; padding: 0 10px; }
+.welding-fields .check { min-height: 36px; }
+.directory-actions { margin-left: auto; justify-content: flex-end; }
+@media (max-width: 860px) {
+  .topbar { padding-top: max(3px, env(safe-area-inset-top)); }
+}
