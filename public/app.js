@@ -176,9 +176,10 @@ async function enter() {
   $('#passkeys-manage').hidden = !session.passkeyEnabled;
   alertIn($('#passkey-error'), '');
   if (!session.user) {
-    $('#sms-form').hidden = !session.smsEnabled;
+    $('#sms-form').hidden = true;
     $('#test-login-toggle').hidden = !session.smsEnabled;
-    $('#login-form').hidden = Boolean(session.smsEnabled);
+    $('#test-login-toggle').textContent = 'Войти по SMS';
+    $('#login-form').hidden = false;
     resetSms();
   }
   if (!session.user) {
@@ -603,7 +604,7 @@ function openDirectoryEditor(project = null, employee = null) {
       field('Разряд', 'grade', 'type="number" min="1" max="8" value="' + (employee?.grade ?? '') + '"') +
       assignmentChoices(state.data.workers.find(item => item.id === employee?.id)?.supervisor_ids ?? []) + '</div>' +
       field('Должность', 'position', 'maxlength="120" value="' + safe(employee?.position) + '"') +
-      field('Номер телефона для входа по SMS', 'phone', 'type="tel" maxlength="25" autocomplete="off" value="' + safe(employee?.phone) + '"') +
+      (state.session.smsEnabled ? field('Номер телефона для входа по SMS', 'phone', 'type="tel" maxlength="25" autocomplete="off" value="' + safe(employee?.phone) + '"') : '') +
       '<div id="legacy-employee-fields">' +
       field('Логин', 'username', 'minlength="3" maxlength="40" autocomplete="off" value="' + safe(employee?.username) + '"') +
       field(employee ? 'Новый пароль (необязательно)' : 'Пароль (от 12 символов)', 'password',
@@ -618,20 +619,22 @@ function openDirectoryEditor(project = null, employee = null) {
   if (workers) {
     form.elements.role.addEventListener('change', () => { $('#worker-fields').hidden = form.elements.role.value !== 'worker'; });
     const updateLoginFields = () => {
-      const byPhone = Boolean(form.elements.phone.value.trim());
+      const byPhone = Boolean(form.elements.phone?.value.trim());
       $('#legacy-employee-fields').hidden = byPhone;
       form.elements.username.disabled = byPhone;
       form.elements.password.disabled = byPhone;
       form.elements.username.required = !byPhone;
       form.elements.password.required = !byPhone && !employee;
     };
-    form.elements.phone.required = Boolean(employee?.phone);
-    form.elements.phone.addEventListener('input', updateLoginFields);
+    if (form.elements.phone) {
+      form.elements.phone.required = Boolean(employee?.phone);
+      form.elements.phone.addEventListener('input', updateLoginFields);
+    }
     updateLoginFields();
   }
   bindForm(form, fields => workers ? api(employee ? 'users/' + employee.id : 'users', {
     name: fields.name.value, role: fields.role.value, position: fields.position.value,
-    ...(fields.phone.value.trim() ? { phone: fields.phone.value }
+    ...(fields.phone?.value.trim() ? { phone: fields.phone.value }
       : { username: fields.username.value, password: fields.password.value }),
     supervisor_ids: selectedSupervisors(fields), grade: Number(fields.grade.value) || null
   }) : api(project ? 'projects/' + project.id : 'projects', {
@@ -959,10 +962,10 @@ function resetSms() {
 
 $('#sms-reset').addEventListener('click', resetSms);
 $('#test-login-toggle').addEventListener('click', () => {
-  const test = $('#login-form').hidden;
-  $('#login-form').hidden = !test;
-  $('#sms-form').hidden = test;
-  $('#test-login-toggle').textContent = test ? 'Войти по SMS' : 'Тестовый вход';
+  const bySms = $('#sms-form').hidden;
+  $('#login-form').hidden = bySms;
+  $('#sms-form').hidden = !bySms;
+  $('#test-login-toggle').textContent = bySms ? 'Войти по паролю' : 'Войти по SMS';
 });
 smsForm.addEventListener('submit', async event => {
   event.preventDefault();

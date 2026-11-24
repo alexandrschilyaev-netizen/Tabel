@@ -20,7 +20,7 @@ const passkeys = !demo && (secure || localOrigin)
   ? passkeyService(db, externalOrigin, duration * 1000, requireThat) : null;
 const smsKey = process.env.TABEL_SMS_RU_API_ID;
 const authKey = process.env.TABEL_AUTH_KEY;
-const smsEnabled = Boolean(smsKey && authKey?.length >= 32 && secure && !demo);
+const smsEnabled = process.env.TABEL_SMS_ENABLED === '1' && Boolean(smsKey && authKey?.length >= 32 && secure && !demo);
 const fallbackPassword = await hashPassword(randomBytes(32).toString('hex'));
 const limits = new Map();
 
@@ -187,7 +187,7 @@ function data(user, month) {
   const projects = user.role === 'worker' ? allProjects.filter(project => projectIds.has(project.id)) : allProjects;
   const hr = user.role === 'hr';
   const staff = hr ? db.prepare("SELECT id,name,role FROM users WHERE role IN ('master','foreman','engineer') ORDER BY name").all() : [];
-  const employees = hr ? db.prepare('SELECT id,username,name,role,grade,phone,position FROM users ORDER BY name').all() : [];
+  const employees = hr ? db.prepare('SELECT id,username,name,role,grade,CASE WHEN ? THEN phone END AS phone,position FROM users ORDER BY name').all(Number(smsEnabled)) : [];
   if (hr) {
     const workerById = new Map(workers.map(worker => [worker.id, worker]));
     workers.forEach(worker => { worker.supervisor_ids = []; });
@@ -388,7 +388,7 @@ async function login(req, res, body, previous, mobile) {
     && body.username.length <= 40 && body.password.length <= 128, 400, 'Проверьте логин и пароль.');
   const name = body.username.trim();
   limitLogin(req, name);
-  const user = db.prepare('SELECT id,password FROM users WHERE username=? AND phone IS NULL').get(name);
+  const user = db.prepare('SELECT id,password FROM users WHERE username=? AND (?=0 OR phone IS NULL)').get(name, Number(smsEnabled));
   const valid = await checkPassword(body.password, user?.password ?? fallbackPassword);
   requireThat(valid && user?.password, 401, 'Неверный логин или пароль.');
   limits.delete('user:' + name.toLowerCase());
@@ -514,29 +514,31 @@ function writeAssignments(worker, ids) {
 
 async function saveUser(res, body, actor, id = null) {
   const { name, password, grade } = body;
-  const existing = id === null ? null : db.prepare('SELECT role,phone,position,username FROM users WHERE id=?').get(id);
+  const existing = id === null ? null : db.prepare('SELECT role,phone,position,username,password IS NOT NULL AS has_password FROM users WHERE id=?').get(id);
+  requireThat(id === null || existing, 404, 'Сотрудник не найден.');
+  requireThat(smsEnabled || body.phone === undefined, 400, 'Вход по SMS отключён. Укажите логин и пароль.');
   const phone = body.phone === undefined ? existing?.phone ?? null : normalizePhone(body.phone);
   requireThat(body.phone === undefined || phone, 400, 'Укажите номер телефона в формате +7.');
+  const bySms = Boolean(smsEnabled && phone);
   const position = body.position === undefined ? existing?.position ?? null : body.position;
   requireThat(position === null || (typeof position === 'string' && position.length <= 120), 400, 'Проверьте должность.');
-  const username = body.username || (phone ? existing?.username || 'employee-' + randomBytes(9).toString('hex') : '');
-  requireThat(id === null || existing, 404, 'Сотрудник не найден.');
+  const username = body.username || existing?.username || (bySms ? 'employee-' + randomBytes(9).toString('hex') : '');
   const role = existing?.role ?? body.role;
   requireThat(typeof username === 'string' && /^[a-z0-9._-]{3,40}$/i.test(username) && Object.hasOwn(roles, role), 400, 'Укажите роль и логин из 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний.');
   requireThat(typeof name === 'string' && name.trim().length > 1 && name.trim().length <= 120, 400, 'Укажите имя сотрудника.');
-  const keepPassword = existing && (password === undefined || password === '');
-  requireThat(phone || keepPassword || (typeof password === 'string' && password.length >= 12 && password.length <= 128), 400, 'Пароль должен содержать от 12 до 128 символов.');
+  const keepPassword = existing?.has_password && (password === undefined || password === '');
+  requireThat(bySms || keepPassword || (typeof password === 'string' && password.length >= 12 && password.length <= 128), 400, 'Пароль должен содержать от 12 до 128 символов.');
   const worker = role === 'worker';
   requireThat(!worker || grade === null || (Number.isInteger(grade) && grade >= 1 && grade <= 8), 400, 'Укажите разряд от 1 до 8.');
-  const hash = phone || keepPassword ? null : await hashPassword(password);
+  const hash = bySms || keepPassword ? null : await hashPassword(password);
   try {
     transaction(() => {
       if (phone) requireThat(!db.prepare('SELECT id FROM users WHERE phone=?').all(phone).some(account => account.id !== id), 409, 'Этот номер уже привязан к другому сотруднику.');
       const ids = worker && (!existing || body.supervisor_ids !== undefined)
         ? validateAssignments(body.supervisor_ids ?? []) : null;
       if (existing) {
-        db.prepare('UPDATE users SET username=?,name=?,grade=?,password=CASE WHEN ? IS NOT NULL THEN NULL ELSE COALESCE(?,password) END,phone=?,position=? WHERE id=?')
-          .run(username, name.trim(), worker ? grade : null, phone, hash, phone, position?.trim() ?? null, id);
+        db.prepare('UPDATE users SET username=?,name=?,grade=?,password=CASE WHEN ? THEN NULL ELSE COALESCE(?,password) END,phone=?,position=? WHERE id=?')
+          .run(username, name.trim(), worker ? grade : null, Number(bySms), hash, phone, position?.trim() ?? null, id);
         if (hash || phone !== existing.phone) {
           db.prepare('DELETE FROM trusted_devices WHERE user_id=?').run(id);
           for (const table of ['sessions', 'mobile_sessions']) {

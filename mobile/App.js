@@ -75,15 +75,14 @@ function ErrorMessage({ message }) {
 
 function Login({ onLogin }) {
   const [sms, setSms] = useState(false);
-  const [legacy, setLegacy] = useState(false);
-  const [checked, setChecked] = useState(false);
+  const [usePhone, setUsePhone] = useState(false);
   const [phone, setPhone] = useState('');
   const [challenge, setChallenge] = useState(null);
   const [code, setCode] = useState('');
   useEffect(() => {
-    api({}, 'session').then(info => setSms(Boolean(info.smsEnabled))).catch(() => {}).finally(() => setChecked(true));
+    api({}, 'session').then(info => setSms(Boolean(info.smsEnabled))).catch(() => {});
   }, []);
-  const useSms = sms && !legacy;
+  const useSms = sms && usePhone;
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -117,7 +116,7 @@ function Login({ onLogin }) {
             <Text style={styles.brandName}>Группа «ПРИВОД»</Text>
           </View>
           <Text accessibilityRole="header" style={styles.title}>Вход в приложение</Text>
-          {checked && (useSms ? <>
+          {useSms ? <>
             <Field label="Номер телефона" value={phone} onChangeText={setPhone} keyboardType="phone-pad"
               autoComplete="tel" placeholder="+7" editable={!busy && !challenge} />
             {challenge && <>
@@ -132,11 +131,11 @@ function Login({ onLogin }) {
               autoCorrect={false} autoComplete="username" maxLength={40} />
             <Field label="Пароль" value={password} onChangeText={setPassword} autoComplete="current-password"
               secureTextEntry maxLength={128} onSubmitEditing={submit} />
-          </>)}
+          </>}
           <ErrorMessage message={error} />
-          {checked && <Button title={busy ? 'Подождите…' : useSms && !challenge ? 'Получить код' : 'Войти'} primary onPress={submit}
-            disabled={busy || (useSms ? challenge ? code.length !== 6 : !phone.trim() : !username.trim() || !password)} />}
-          {sms && <Button title={legacy ? 'Войти по SMS' : 'Тестовый вход'} disabled={busy} onPress={() => { setLegacy(!legacy); setError(''); }} />}
+          <Button title={busy ? 'Подождите…' : useSms && !challenge ? 'Получить код' : 'Войти'} primary onPress={submit}
+            disabled={busy || (useSms ? challenge ? code.length !== 6 : !phone.trim() : !username.trim() || !password)} />
+          {sms && <Button title={useSms ? 'Войти по паролю' : 'Войти по SMS'} disabled={busy} onPress={() => { setUsePhone(!usePhone); setError(''); }} />}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -759,9 +758,12 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [launchDone, setLaunchDone] = useState(false);
   useEffect(() => {
-    readSession().then(previous => {
-      if (previous?.deviceKey) setDevice(previous);
-      else if (previous?.token) setSession(previous);
+    readSession().then(async previous => {
+      if (previous?.deviceKey) {
+        const config = await api({}, 'session');
+        if (config.smsEnabled) setDevice(previous);
+        else await clearSession();
+      } else if (previous?.token) setSession(previous);
     }).catch(() => {}).finally(() => setReady(true));
   }, []);
   async function login(auth, sms) {
