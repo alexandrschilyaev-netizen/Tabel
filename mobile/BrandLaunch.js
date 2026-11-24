@@ -1,27 +1,42 @@
 import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
 import { brandMark } from './brand-mark';
+import { hardware, motion } from './launch-artwork';
 
 const duration = 1340;
-const terminals = [0, 1, 2, 3];
+const frameWidth = 300;
+const frameHeight = 148;
+const columns = 6;
+const rows = 4;
+const frameDuration = 45;
+
+const frames = Array.from({ length: columns * rows }, (_, index) => index);
+const frameTimes = [
+  0,
+  ...frames.slice(1).flatMap(index => [index * frameDuration - .1, index * frameDuration]),
+  duration
+];
+const positions = frames.flatMap(index => [index, index]);
 
 export function BrandLaunch({ onComplete }) {
-  const progress = useRef(new Animated.Value(0)).current;
+  const clock = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     let active = true;
-    const animation = Animated.timing(progress, {
-      toValue: 1, duration, easing: Easing.linear, useNativeDriver: true
+    let reduced = false;
+    const animation = Animated.timing(clock, {
+      toValue: duration, duration, easing: Easing.linear, useNativeDriver: true
     });
     function reduceMotion() {
+      reduced = true;
       animation.stop();
-      progress.setValue(1);
+      clock.setValue(duration);
       if (active) onComplete(true);
     }
     const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', reduce => {
       if (reduce) reduceMotion();
     });
     function start(reduce) {
-      if (!active) return;
+      if (!active || reduced) return;
       if (reduce) reduceMotion();
       else animation.start(({ finished }) => { if (active && finished) onComplete(true); });
     }
@@ -31,42 +46,37 @@ export function BrandLaunch({ onComplete }) {
       subscription.remove();
       animation.stop();
     };
-  }, [onComplete, progress]);
+  }, [onComplete, clock]);
+
+  const opacity = clock.interpolate({
+    inputRange: [0, 162, 983, 1080, duration],
+    outputRange: [.35, 1, 1, 0, 0]
+  });
+  const shift = clock.interpolate({
+    inputRange: [0, 162, 983, 1080, duration],
+    outputRange: [5, 0, 0, -5, -5]
+  });
+  const frameX = clock.interpolate({
+    inputRange: frameTimes,
+    outputRange: positions.map(index => -(index % columns) * frameWidth)
+  });
+  const frameY = clock.interpolate({
+    inputRange: frameTimes,
+    outputRange: positions.map(index => -Math.floor(index / columns) * frameHeight)
+  });
+  const logoOpacity = clock.interpolate({ inputRange: [0, 992, duration], outputRange: [0, 0, 1] });
+  const logoShift = clock.interpolate({ inputRange: [0, 992, duration], outputRange: [5, 5, 0] });
 
   return (
     <View style={styles.screen} accessibilityLabel="Открываем табель" accessibilityRole="progressbar">
       <View style={styles.stage} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-        <Animated.View style={[styles.circuit, {
-          opacity: progress.interpolate({ inputRange: [0, .18, .62, .86, 1], outputRange: [.3, 1, 1, 0, 0] }),
-          transform: [{ translateY: progress.interpolate({ inputRange: [0, .18, .62, 1], outputRange: [8, 0, 0, -8] }) }]
-        }]}>
-          <View style={styles.module}>
-            <Text style={styles.unitTitle}>ПЛК</Text>
-            <Animated.View style={[styles.ledRow, {
-              opacity: progress.interpolate({ inputRange: [0, .12, .22, 1], outputRange: [.3, .3, 1, 1] })
-            }]}>
-              {terminals.map(i => <View key={i} style={[styles.led, i % 2 === 1 && styles.ledDim]} />)}
-            </Animated.View>
-            <View style={styles.terminals}>{terminals.map(i => <View key={i} style={styles.terminal} />)}</View>
-          </View>
-          <View style={styles.wire}>
-            <Animated.View style={[styles.signal, {
-              opacity: progress.interpolate({ inputRange: [0, .18, .26, .52, .59, 1], outputRange: [0, 0, 1, 1, 0, 0] }),
-              transform: [{ translateX: progress.interpolate({ inputRange: [0, .18, .59, 1], outputRange: [0, 0, 54, 54] }) }]
-            }]} />
-          </View>
-          <View style={styles.module}>
-            <Text style={styles.unitTitle}>ЧРП</Text>
-            <Animated.Text style={[styles.frequency, {
-              opacity: progress.interpolate({ inputRange: [0, .47, .6, 1], outputRange: [.25, .25, 1, 1] })
-            }]}>50,0 Гц</Animated.Text>
-            <View style={styles.terminals}>{terminals.map(i => <View key={i} style={styles.terminal} />)}</View>
-          </View>
+        <Animated.View style={[styles.picture, { opacity, transform: [{ translateY: shift }] }]}>
+          <Image source={hardware} style={styles.hardware} resizeMode="stretch" fadeDuration={0} />
+          <Animated.Image source={motion} style={[styles.frames, {
+            transform: [{ translateX: frameX }, { translateY: frameY }]
+          }]} resizeMode="stretch" fadeDuration={0} />
         </Animated.View>
-        <Animated.View style={[styles.lockup, {
-          opacity: progress.interpolate({ inputRange: [0, .68, 1], outputRange: [0, 0, 1] }),
-          transform: [{ translateY: progress.interpolate({ inputRange: [0, .68, 1], outputRange: [5, 5, 0] }) }]
-        }]}>
+        <Animated.View style={[styles.lockup, { opacity: logoOpacity, transform: [{ translateY: logoShift }] }]}>
           <View style={styles.markPlate}><Image source={brandMark} style={styles.mark} resizeMode="contain" /></View>
           <View>
             <Text style={styles.company}>ГРУППА «ПРИВОД»</Text>
@@ -81,20 +91,10 @@ export function BrandLaunch({ onComplete }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0b251c' },
-  stage: { width: 280, height: 150, alignItems: 'center', justifyContent: 'center' },
-  circuit: { flexDirection: 'row', alignItems: 'center' },
-  module: { width: 87, height: 104, backgroundColor: '#1f4836', borderColor: '#739988', borderWidth: 1,
-    borderRadius: 10, padding: 10 },
-  unitTitle: { color: '#d8e9de', fontSize: 11, fontWeight: '800', letterSpacing: 1.1 },
-  ledRow: { flexDirection: 'row', gap: 6, marginTop: 16 },
-  led: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#a3e2ae' },
-  ledDim: { opacity: .45 },
-  terminals: { marginTop: 'auto', flexDirection: 'row', gap: 6 },
-  terminal: { width: 5, height: 9, borderRadius: 1, backgroundColor: '#668977' },
-  wire: { width: 72, height: 1, backgroundColor: '#5e9177' },
-  signal: { width: 18, height: 3, top: -1, borderRadius: 2, backgroundColor: '#a3e2ae' },
-  frequency: { paddingVertical: 5, paddingHorizontal: 3, marginTop: 7, color: '#a3e2ae', backgroundColor: '#10251d',
-    borderColor: '#4d7564', borderWidth: 1, borderRadius: 4, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  stage: { width: frameWidth, height: 160, alignItems: 'center', justifyContent: 'center' },
+  picture: { width: frameWidth, height: frameHeight, overflow: 'hidden' },
+  hardware: { width: frameWidth, height: frameHeight },
+  frames: { position: 'absolute', top: 0, left: 0, width: frameWidth * columns, height: frameHeight * rows },
   lockup: { position: 'absolute', flexDirection: 'row', gap: 15, alignItems: 'center' },
   markPlate: { width: 72, height: 72, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
   mark: { width: 46, height: 46 },

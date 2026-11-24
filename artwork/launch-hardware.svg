@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="148" viewBox="0 0 300 148">
+  <defs>
+    <linearGradient id="plcFace" x2="0" y2="1">
+      <stop stop-color="#647987"/><stop offset=".52" stop-color="#3d505c"/><stop offset="1" stop-color="#263a43"/>
+    </linearGradient>
+    <linearGradient id="driveFace" x2=".24" y2="1">
+      <stop stop-color="#717e82"/><stop offset="1" stop-color="#35464a"/>
+    </linearGradient>
+    <linearGradient id="motorBody" x2="0" y2="1">
+      <stop stop-color="#819e96"/><stop offset=".37" stop-color="#55786f"/><stop offset="1" stop-color="#2c4946"/>
+    </linearGradient>
+    <linearGradient id="sheath" x1="0" x2="0" y1="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#344e48"/><stop offset="1" stop-color="#738b80"/>
+    </linearGradient>
+    <pattern id="contacts" width="6" height="5" patternUnits="userSpaceOnUse">
+      <path d="M1 1h3v2H1z" fill="#090f13"/><path d="M1 3h3v.5H1z" fill="#abb7b6" opacity=".6"/>
+    </pattern>
+    <pattern id="status" width="4.5" height="7" patternUnits="userSpaceOnUse">
+      <rect x="1" y="1" width="2" height="2" rx=".4" fill="#112423"/>
+      <rect x="1" y="5" width="2" height=".6" fill="#8fa39f"/>
+    </pattern>
+  </defs>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#081c18" stroke-width="8">
+      <path id="control" d="M89 97 V108 Q89 118 99 118 H129 Q137 118 137 110 V103"/>
+      <path id="power" d="M183 105 V117 Q183 126 192 126 H210 Q222 126 222 114 V58 Q222 51 229 51 H242"/>
+    </g>
+    <g stroke="url(#sheath)">
+      <use href="#control" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#control" stroke-width="4"/>
+      <use href="#power" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#power" stroke-width="4.5"/>
+    </g>
+  </g>
+  <g stroke-linejoin="round">
+    <path d="M9 35l10-9h79l8 7v57l-10 10H9z" fill="#1d2d37" stroke="#11252b"/>
+    <path d="M9 35l10-9h79l8 7H20z" fill="#8b9aa0" stroke="#5e737c"/>
+    <path d="M23 27.5h71l4 3.5H19z" fill="url(#contacts)"/>
+    <path d="M10 35h88v60l-9 5H10z" fill="url(#plcFace)" stroke="#83949c"/>
+    <path d="M10 60h88m-88 22h88M26 61v21m33-21v21" fill="none" stroke="#17282e"/>
+    <path d="M10 62h88m-88 22h88" fill="none" stroke="#a0b0b5" opacity=".55"/>
+    <path d="M13 35h82v5H13z" fill="#142a31"/>
+    <path d="M15 36h79v4H15z" fill="url(#contacts)"/>
+    <path d="M61 62h34v19H61z" fill="url(#status)"/>
+    <path d="M14 63h10v15H14z" fill="url(#status)"/>
+    <path d="M31 65h23v13H31z" fill="#455966" stroke="#82929b" stroke-width=".55"/>
+    <path d="M42 65v13m-4-13v-2h8v2" fill="none" stroke="#83969b" stroke-width=".7"/>
+    <path d="M14 92h82v5H14z" fill="#1a2d36"/>
+    <path d="M15 92h69v4H15z" fill="url(#contacts)"/>
+    <path d="M83 91h12v7l-3 3h-7l-2-3z" fill="#112424" stroke="#849a99" stroke-width=".8"/>
+    <path d="M85 93h8m-7 2h6" stroke="#99a8a6" stroke-width=".65"/>
+    <path d="M98 37l8-4v57l-8 7z" fill="#243746" stroke="#566e78"/>
+    <g fill="#1b302e" stroke="#82968d" stroke-width=".55">
+      <rect x="16" y="50" width="5" height="3" rx=".8"/><rect x="25" y="50" width="5" height="3" rx=".8"/><rect x="34" y="50" width="5" height="3" rx=".8"/>
+    </g>
+  </g>
+  <g stroke-linejoin="round">
+    <path d="M125 21l12-11v93l-12-11z" fill="#4d6668" stroke="#8d9b9b"/>
+    <path d="M127 28l6-3v34l-6 3zm0 42l6-3v20l-6 3z" fill="#23383b"/>
+    <path d="M129 28v32m2-33v32m-2 11v19m2-20v19" stroke="#718485" stroke-width=".65"/>
+    <path d="M137 10h52l2 6 4 2v82l-5 6h-51l-4-5V14z" fill="url(#driveFace)" stroke="#a0acaa"/>
+    <path d="M139 99h54m-56-4h57" fill="none" stroke="#283b3c"/>
+    <path d="M142 16h46v62l-5 5h-38l-3-3z" fill="#2e3e42" stroke="#17292a"/>
+    <path d="M145 22h40v21h-40z" fill="#142c2d" stroke="#7c8b85" stroke-width=".7"/>
+    <path d="M147 24h36v16h-36z" fill="#091f20"/>
+    <path d="M147 46h37m-37 2h37" stroke="#b2c5b8" stroke-width=".6" stroke-dasharray="2 .8" opacity=".67"/>
+    <g stroke-width=".6">
+      <rect x="146" y="52" width="9" height="7" rx=".8" fill="#ce965b" stroke="#e8ad6b"/>
+      <rect x="146" y="62" width="9" height="7" rx=".8" fill="#ce965b" stroke="#e8ad6b"/>
+      <rect x="146" y="72" width="9" height="7" rx=".8" fill="#ce965b" stroke="#e8ad6b"/>
+      <rect x="158" y="52" width="11" height="7" rx=".8" fill="#576a6e" stroke="#899d9d"/>
+      <rect x="158" y="62" width="11" height="7" rx=".8" fill="#576a6e" stroke="#899d9d"/>
+      <rect x="158" y="72" width="11" height="7" rx=".8" fill="#397b60" stroke="#639d82"/>
+      <rect x="172" y="62" width="11" height="7" rx=".8" fill="#ce965b" stroke="#e8ad6b"/>
+      <rect x="172" y="72" width="11" height="7" rx=".8" fill="#a85b58" stroke="#d1817b"/>
+      <circle cx="177" cy="55" r="5" fill="#17292d" stroke="#829292"/>
+      <path d="M177 52v3m-16 1 2.5-2 2.5 2m-5 8.5 2.5 2 2.5-2m-18-9h5m-5 10h5m-5 10h5m23-10h5" fill="none" stroke="#e0e9dd" stroke-linecap="round"/>
+      <path d="M162 74l3 1.5-3 1.5z" fill="#d0eee1"/><path d="M176 74h3v3h-3z" fill="#f7d1c9"/>
+    </g>
+    <path d="M140 87h7m-7 3h7m-7 3h7m39-6h6m-6 3h6m-6 3h6" stroke="#223537" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M138 100h9v5h-9zm41 1h9v7h-9z" fill="#182a2c" stroke="#788e83" stroke-width=".6"/>
+    <path d="M181 104h5m-5 1.8h5" stroke="#8ca295" stroke-width=".5"/>
+  </g>
+  <g stroke-linejoin="round">
+    <path d="M234 82h49l4 19h-49z" fill="#2f4b46" stroke="#7f9b90"/>
+    <path d="M232 99h57v4h-57z" fill="#58776e" stroke="#90a79e"/>
+    <path d="M242 49h39c7 0 13 10 13 23s-6 23-13 23h-39c-6 0-11-10-11-23s5-23 11-23z" fill="url(#motorBody)" stroke="#89a69b"/>
+    <path d="M245 53h34m-38 5h38m-40 6h38m-39 6h39m-39 6h39m-38 6h38m-34 6h37" stroke="#a3bcb0" stroke-width="1.1" stroke-linecap="round" opacity=".8"/>
+    <path d="M247 55h29m-32 5h32m-34 6h34m-35 6h34m-35 6h35m-34 6h36m-31 6h31" stroke="#203d36" stroke-width=".8" stroke-linecap="round"/>
+    <ellipse cx="282" cy="72" rx="12" ry="22" fill="#3b5c51" stroke="#9eb4a9"/>
+    <ellipse cx="284" cy="72" rx="7.2" ry="13.5" fill="#203b33" stroke="#77978a"/>
+    <path d="M284 69h12l3 1v4l-3 1h-12z" fill="url(#motorBody)" stroke="#9eb2a9" stroke-width=".8"/>
+    <ellipse cx="297.5" cy="72" rx="1.5" ry="3" fill="#afc3b7"/>
+    <path d="M242 40h23l4 4v12h-27l-2-3v-9z" fill="#4b6a5e" stroke="#9bb0a5"/>
+    <path d="M242 44h27m-24 2h21" stroke="#9ab0a4" stroke-width=".7"/>
+    <rect x="236" y="48" width="9" height="6" rx="1.5" fill="#254038" stroke="#a3b6ad" stroke-width=".7"/>
+    <path d="M238 48v6m2-6v6" stroke="#769589" stroke-width=".7"/>
+  </g>
+  <g fill="#bdd2c9" font-family="DejaVu Sans, sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">
+    <text x="58" y="142">ПЛК</text><text x="161" y="142">ЧРП</text><text x="266" y="142">ДВИГАТЕЛЬ</text>
+  </g>
+</svg>

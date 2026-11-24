@@ -32,6 +32,8 @@ const assets = {
   '/offline.html': ['offline.html', 'text/html; charset=utf-8'],
   '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
   '/icons/privod.png': ['icons/privod.png', 'image/png'],
+  '/icons/launch-hardware.png': ['icons/launch-hardware.png', 'image/png'],
+  '/icons/launch-motion.png': ['icons/launch-motion.png', 'image/png'],
   '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
   '/icons/icon-512.png': ['icons/icon-512.png', 'image/png']
 };
