@@ -3,7 +3,7 @@ const roles = { worker: 'Монтажник', master: 'Мастер', foreman: '
 const projectColors = ['#2563eb', '#15803d', '#b45309', '#7c3aed', '#be185d', '#0e7490', '#b91c1c', '#475569'];
 const statuses = { approved: 'Учтена', closed: 'Закрыта' };
 const kinds = { work: 'Работа', vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Выходной' };
-const pages = { tabel: 'Табель', workers: 'Сотрудники', projects: 'Объекты', calendar: 'Праздники' };
+const pages = { tabel: 'Табель', workers: 'Сотрудники', projects: 'Объекты', calendar: 'Праздники', profile: 'Карточка сотрудника', requests: 'Заявления' };
 const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const weekdays = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const paths = {
@@ -172,6 +172,12 @@ async function enter() {
   $('#app').classList.toggle('worker-view', session.user?.role === 'worker');
   $('#demo-login').hidden = !session.demo;
   if (!session.user) {
+    $('#sms-form').hidden = !session.smsEnabled;
+    $('#test-login-toggle').hidden = !session.smsEnabled;
+    $('#login-form').hidden = Boolean(session.smsEnabled);
+    resetSms();
+  }
+  if (!session.user) {
     ++loadId;
     if (editor.open) editor.close();
     state.data = null;
@@ -199,7 +205,10 @@ async function enter() {
 function render() {
   const { user, lock, canEdit, summary } = state.data;
   $('#tabel-view').hidden = state.page !== 'tabel';
-  $('#directory-view').hidden = state.page === 'tabel';
+  const pending = ['profile', 'requests'].includes(state.page);
+  $('#directory-view').hidden = state.page === 'tabel' || pending;
+  $('#pending-view').hidden = !pending;
+  $('#pending-title').textContent = pending ? pages[state.page] : '';
   $('#trail-page').textContent = pages[state.page];
   document.querySelectorAll('[data-page]').forEach(button => {
     if (button.dataset.page === state.page) button.setAttribute('aria-current', 'page');
@@ -212,6 +221,7 @@ function render() {
   $('#close-month').disabled = !summary.records;
   alertIn($('#month-lock'), lock ? 'Месяц закрыт · ' + lock.closed_by + ' · ' + timestamp(lock.closed_at) : '');
   $('#calendar-period').hidden = state.page !== 'calendar';
+  if (pending) return;
   if (state.page === 'calendar') {
     renderCalendar();
     return;
@@ -362,7 +372,7 @@ function renderDirectory(user) {
     const assign = worker && user.role === 'hr' ? '<button type="button" data-assign="' + row.id + '">Руководители</button>' : '';
     const edit = user.role === 'hr' ? '<button type="button" data-user-edit="' + row.id + '" aria-label="' +
       safe('Изменить сотрудника ' + row.name) + '">Изменить</button>' : '';
-    return '<div class="directory-row">' + person(row, caption) + '<span class="directory-actions">' + assign + edit + '</span></div>';
+    return '<div class="directory-row">' + person(row, [caption, row.position].filter(Boolean).join(' · ')) + '<span class="directory-actions">' + assign + edit + '</span></div>';
   });
   $('#directory').innerHTML = rows.join('') || '<p class="empty-state">Список пока пуст.</p>';
   paintProjects($('#directory'));
@@ -588,9 +598,12 @@ function openDirectoryEditor(project = null, employee = null) {
       '<div id="worker-fields"' + (employee && employee.role !== 'worker' ? ' hidden' : '') + '>' +
       field('Разряд', 'grade', 'type="number" min="1" max="8" value="' + (employee?.grade ?? '') + '"') +
       assignmentChoices(state.data.workers.find(item => item.id === employee?.id)?.supervisor_ids ?? []) + '</div>' +
-      field('Логин', 'username', 'required minlength="3" maxlength="40" autocomplete="off" value="' + safe(employee?.username) + '"') +
+      field('Должность', 'position', 'maxlength="120" value="' + safe(employee?.position) + '"') +
+      field('Номер телефона для входа по SMS', 'phone', 'type="tel" maxlength="25" autocomplete="off" value="' + safe(employee?.phone) + '"') +
+      '<div id="legacy-employee-fields">' +
+      field('Логин', 'username', 'minlength="3" maxlength="40" autocomplete="off" value="' + safe(employee?.username) + '"') +
       field(employee ? 'Новый пароль (необязательно)' : 'Пароль (от 12 символов)', 'password',
-        'type="password" minlength="12" maxlength="128" autocomplete="new-password"' + (employee ? '' : ' required'))
+        'type="password" minlength="12" maxlength="128" autocomplete="new-password"') + '</div>'
       : field('Название', 'name', 'required maxlength="80" value="' + safe(project?.name) + '"') +
       field('Адрес или площадка', 'address', 'maxlength="160" value="' + safe(project?.address) + '"') +
       field('Цвет объекта', 'color', 'type="color" value="' + safe(color) + '"')) +
@@ -598,9 +611,24 @@ function openDirectoryEditor(project = null, employee = null) {
     (project || employee ? 'Сохранить' : 'Добавить') + '</button></div></form>'
   );
   const form = editor.querySelector('form');
-  if (workers) form.elements.role.addEventListener('change', () => { $('#worker-fields').hidden = form.elements.role.value !== 'worker'; });
+  if (workers) {
+    form.elements.role.addEventListener('change', () => { $('#worker-fields').hidden = form.elements.role.value !== 'worker'; });
+    const updateLoginFields = () => {
+      const byPhone = Boolean(form.elements.phone.value.trim());
+      $('#legacy-employee-fields').hidden = byPhone;
+      form.elements.username.disabled = byPhone;
+      form.elements.password.disabled = byPhone;
+      form.elements.username.required = !byPhone;
+      form.elements.password.required = !byPhone && !employee;
+    };
+    form.elements.phone.required = Boolean(employee?.phone);
+    form.elements.phone.addEventListener('input', updateLoginFields);
+    updateLoginFields();
+  }
   bindForm(form, fields => workers ? api(employee ? 'users/' + employee.id : 'users', {
-    name: fields.name.value, username: fields.username.value, role: fields.role.value, password: fields.password.value,
+    name: fields.name.value, role: fields.role.value, position: fields.position.value,
+    ...(fields.phone.value.trim() ? { phone: fields.phone.value }
+      : { username: fields.username.value, password: fields.password.value }),
     supervisor_ids: selectedSupervisors(fields), grade: Number(fields.grade.value) || null
   }) : api(project ? 'projects/' + project.id : 'projects', {
     name: fields.name.value, address: fields.address.value, color: fields.color.value
@@ -838,6 +866,72 @@ $('#status-filter').innerHTML = option('', 'Все статусы') + Object.ent
 $('#month-filter').innerHTML = monthNames.map((name, i) => option(String(i + 1).padStart(2, '0'), name)).join('');
 $('#year-filter').innerHTML = Array.from({ length: 100 }, (_, i) => option(2000 + i, 2000 + i)).join('');
 $('#legend').innerHTML = Object.entries(statuses).map(([key, label]) => '<span><i class="dot status-' + key + '" aria-hidden="true"></i>' + label + '</span>').join('');
+const smsForm = $('#sms-form');
+let smsChallenge = null;
+
+function resetSms() {
+  smsChallenge = null;
+  smsForm.elements.phone.readOnly = false;
+  smsForm.elements.code.value = '';
+  smsForm.elements.code.required = false;
+  $('#sms-code-field').hidden = true;
+  $('#sms-reset').hidden = true;
+  smsForm.querySelector('button[type="submit"], button.primary').textContent = 'Получить код';
+  alertIn(smsForm.querySelector('.error'), '');
+}
+
+$('#sms-reset').addEventListener('click', resetSms);
+$('#test-login-toggle').addEventListener('click', () => {
+  const test = $('#login-form').hidden;
+  $('#login-form').hidden = !test;
+  $('#sms-form').hidden = test;
+  $('#test-login-toggle').textContent = test ? 'Войти по SMS' : 'Тестовый вход';
+});
+smsForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = smsForm.querySelector('button.primary');
+  const errorBox = smsForm.querySelector('.error');
+  submit.disabled = true;
+  try {
+    if (smsChallenge) {
+      await api('auth/sms/verify', { challenge: smsChallenge, code: smsForm.elements.code.value.trim() });
+      smsForm.reset();
+      resetSms();
+      await enter();
+    } else {
+      const reply = await api('auth/sms/request', { phone: smsForm.elements.phone.value });
+      smsChallenge = reply.challenge;
+      smsForm.elements.phone.readOnly = true;
+      smsForm.elements.code.required = true;
+      $('#sms-code-field').hidden = false;
+      $('#sms-reset').hidden = false;
+      submit.textContent = 'Войти';
+      alertIn(errorBox, 'Введите код, если SMS пришло на указанный номер.');
+      smsForm.elements.code.focus();
+    }
+  } catch (error) {
+    alertIn(errorBox, error.message);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+function toggleMenu(open) {
+  $('#side-menu').hidden = !open;
+  $('#menu-toggle').setAttribute('aria-expanded', String(open));
+}
+
+$('#menu-toggle').addEventListener('click', () => toggleMenu($('#side-menu').hidden));
+document.addEventListener('click', event => {
+  if (!$('#side-menu').hidden && !event.target.closest('#side-menu, #menu-toggle')) toggleMenu(false);
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('#side-menu').hidden) {
+    toggleMenu(false);
+    $('#menu-toggle').focus();
+  }
+});
+
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -870,6 +964,7 @@ $('#logout').addEventListener('click', async () => {
 });
 function activePage(role = state.data?.user.role) {
   const page = location.hash.slice(1);
+  if (['profile', 'requests'].includes(page)) return page;
   return role !== 'worker' && Object.hasOwn(pages, page) && (page !== 'calendar' || role === 'hr') ? page : 'tabel';
 }
 
@@ -877,9 +972,10 @@ $('#navigation').addEventListener('click', event => {
   const button = event.target.closest('[data-page]');
   if (!button || !state.data) return;
   location.hash = button.dataset.page;
+  toggleMenu(false);
 });
 window.addEventListener('hashchange', () => {
-  if (!state.data || state.data.user.role === 'worker' || state.page === activePage()) return;
+  if (!state.data || state.page === activePage()) return;
   state.page = activePage();
   notice('');
   render();

@@ -303,3 +303,26 @@ main { padding-top: 16px; }
 @media (max-width: 860px) {
   .topbar { padding-top: max(3px, env(safe-area-inset-top)); }
 }
+
+.app { display: block; }
+.app[hidden], .sidebar[hidden] { display: none; }
+.sidebar {
+  position: absolute; z-index: 5; top: 52px; left: 8px; width: min(270px, calc(100% - 16px));
+  height: auto; padding: 12px; border-radius: 12px; box-shadow: 0 10px 32px #10233c44;
+}
+.sidebar .brand, .sidebar-bottom { display: none; }
+.sidebar nav, .hr-view .sidebar nav, .worker-view .sidebar nav {
+  position: static; display: grid; grid-template-columns: 1fr; margin: 0; padding: 0; gap: 3px;
+}
+.sidebar nav button { flex-direction: row; justify-content: flex-start; text-align: left; font-size: .875rem; padding: 7px 10px; }
+.worker-view [data-page="profile"], .worker-view [data-page="requests"] { display: inline-flex; }
+#menu-toggle { border-color: transparent; padding: 6px 10px; }
+#pending-title { font-size: 1.45rem; margin-bottom: 8px; }
+#test-login-toggle { margin: 10px 0 0; width: 100%; }
+@media (max-width: 860px) {
+  .schedule-desktop { display: block; }
+  .schedule-desktop table { min-width: 720px; }
+  .schedule-desktop th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
+  .schedule-mobile, .day-selector { display: none; }
+  main { padding-bottom: 28px; }
+}

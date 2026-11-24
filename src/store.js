@@ -133,6 +133,22 @@ export function openStore(demo = false) {
     if (!db.prepare('PRAGMA table_info(month_locks)').all().some(column => column.name === 'calendar_policy')) {
       db.exec('ALTER TABLE month_locks ADD COLUMN calendar_policy INTEGER NOT NULL DEFAULT 0;');
     }
+    const userFields = new Set(db.prepare('PRAGMA table_info(users)').all().map(column => column.name));
+    if (!userFields.has('phone')) db.exec('ALTER TABLE users ADD COLUMN phone TEXT;');
+    if (!userFields.has('position')) db.exec('ALTER TABLE users ADD COLUMN position TEXT;');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS users_phone ON users(phone) WHERE phone IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS sms_challenges (
+        id TEXT PRIMARY KEY, user_id INTEGER REFERENCES users(id), phone TEXT NOT NULL,
+        verifier TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL,
+        remaining INTEGER NOT NULL, ready INTEGER NOT NULL DEFAULT 0
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS sms_challenges_phone ON sms_challenges(phone,created);
+      CREATE TABLE IF NOT EXISTS trusted_devices (
+        digest TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), verifier TEXT NOT NULL,
+        expires INTEGER NOT NULL, remaining INTEGER NOT NULL, session_digest TEXT
+      ) STRICT;
+    `);
     const shiftColumns = new Set(db.prepare('PRAGMA table_info(shifts)').all().map(column => column.name));
     for (const column of ['welding', 'zinc_welding']) {
       if (!shiftColumns.has(column)) {

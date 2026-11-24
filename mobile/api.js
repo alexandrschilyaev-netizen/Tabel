@@ -9,7 +9,7 @@ export async function readSession() {
   const raw = await SecureStore.getItemAsync(key, storage);
   if (!raw) return null;
   const session = JSON.parse(raw);
-  if (session.address === serverAddress && session.token && session.expires > Date.now()) return session;
+  if (session.address === serverAddress && (session.deviceKey || (session.token && session.expires > Date.now()))) return session;
   await clearSession();
   return null;
 }
@@ -42,6 +42,7 @@ export async function api(session, path, body, format = 'json') {
       const details = await response.json().catch(() => ({}));
       const error = new Error(details.error || 'Запрос не выполнен.');
       error.status = response.status;
+      error.resetPin = details.resetPin === true;
       throw error;
     }
     if (format === 'binary') return new Uint8Array(await response.arrayBuffer());

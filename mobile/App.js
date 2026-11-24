@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable,
-  RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View
+  RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Directory, File, Paths } from 'expo-file-system';
@@ -72,6 +72,16 @@ function ErrorMessage({ message }) {
 }
 
 function Login({ onLogin }) {
+  const [sms, setSms] = useState(false);
+  const [legacy, setLegacy] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [challenge, setChallenge] = useState(null);
+  const [code, setCode] = useState('');
+  useEffect(() => {
+    api({}, 'session').then(info => setSms(Boolean(info.smsEnabled))).catch(() => {}).finally(() => setChecked(true));
+  }, []);
+  const useSms = sms && !legacy;
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,9 +91,15 @@ function Login({ onLogin }) {
     setBusy(true);
     setError('');
     try {
-      const auth = await api({}, 'login', { username: username.trim(), password });
+      if (useSms && !challenge) {
+        const result = await api({}, 'auth/sms/request', { phone });
+        setChallenge(result.challenge);
+        return;
+      }
+      const auth = useSms ? await api({}, 'auth/sms/verify', { challenge, code })
+        : await api({}, 'login', { username: username.trim(), password });
       if (!auth.token || !auth.expires) throw new Error('Сервер не поддерживает вход из мобильного приложения.');
-      await onLogin({ address: serverAddress, token: auth.token, expires: auth.expires });
+      await onLogin({ address: serverAddress, token: auth.token, expires: auth.expires }, useSms);
     } catch (problem) {
       setError(problem.message);
     } finally {
@@ -96,13 +112,26 @@ function Login({ onLogin }) {
         <View style={styles.loginCard}>
           <Text style={styles.brandName}>Табель</Text>
           <Text accessibilityRole="header" style={styles.title}>Вход в приложение</Text>
-          <Field label="Логин" value={username} onChangeText={setUsername} autoCapitalize="none"
-            autoCorrect={false} autoComplete="username" maxLength={40} />
-          <Field label="Пароль" value={password} onChangeText={setPassword} autoComplete="current-password"
-            secureTextEntry maxLength={128} onSubmitEditing={submit} />
+          {checked && (useSms ? <>
+            <Field label="Номер телефона" value={phone} onChangeText={setPhone} keyboardType="phone-pad"
+              autoComplete="tel" placeholder="+7" editable={!busy && !challenge} />
+            {challenge && <>
+              <Text style={styles.muted}>Введите код, если SMS пришло на указанный номер.</Text>
+              <Field label="Код из SMS" value={code} onChangeText={value => setCode(value.replace(/\D/g, ''))}
+                keyboardType="number-pad" autoComplete="sms-otp" maxLength={6} onSubmitEditing={submit} />
+              <Button title="Другой номер или новый код" disabled={busy}
+                onPress={() => { setChallenge(null); setCode(''); setError(''); }} />
+            </>}
+          </> : <>
+            <Field label="Логин" value={username} onChangeText={setUsername} autoCapitalize="none"
+              autoCorrect={false} autoComplete="username" maxLength={40} />
+            <Field label="Пароль" value={password} onChangeText={setPassword} autoComplete="current-password"
+              secureTextEntry maxLength={128} onSubmitEditing={submit} />
+          </>)}
           <ErrorMessage message={error} />
-          <Button title={busy ? 'Входим…' : 'Войти'} primary onPress={submit}
-            disabled={busy || !username.trim() || !password} />
+          {checked && <Button title={busy ? 'Подождите…' : useSms && !challenge ? 'Получить код' : 'Войти'} primary onPress={submit}
+            disabled={busy || (useSms ? challenge ? code.length !== 6 : !phone.trim() : !username.trim() || !password)} />}
+          {sms && <Button title={legacy ? 'Войти по SMS' : 'Тестовый вход'} disabled={busy} onPress={() => { setLegacy(!legacy); setError(''); }} />}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -202,31 +231,50 @@ function WeldingMarks({ shift, labels = false }) {
     </View>)}</View>;
 }
 
-function ShiftRow({ worker, shift, project, canEdit, onOpen }) {
-  const title = !shift ? (canEdit ? 'Добавить смену' : 'Нет записи') :
-    shift.kind === 'work' ? hours(shift.minutes) + ' · ' + (project?.name ?? '') : kinds[shift.kind];
-  const extra = shift?.overtime_minutes ?? 0;
-  const objectMark = project?.color ? { borderLeftColor: project.color, borderLeftWidth: 5 } : null;
-  const info = (
-    <>
-      <View accessible={false} style={styles.avatar}><Text style={styles.avatarText}>{initials(worker.name)}</Text></View>
-      <View style={styles.fill}>
-        <Text style={styles.label}>{worker.name}</Text>
-        <Text style={styles.muted}>{title}</Text>
-        {!!shift?.note && <Text style={styles.muted}>Есть комментарий</Text>}
+function WeekGrid({ data, day, onOpen, busy }) {
+  const { width } = useWindowDimensions();
+  const dates = daysInWeek(day);
+  const cellWidth = Math.max(68, Math.floor((Math.min(width, 1600) - 276) / 7));
+  const shifts = new Map(data.shifts.map(shift => [shift.worker_id + ':' + shift.date, shift]));
+  const projects = new Map(data.projects.map(project => [project.id, project]));
+  return <ScrollView horizontal style={styles.grid} keyboardShouldPersistTaps="handled">
+    <View>
+      <View style={styles.gridRow}>
+        <Text style={styles.gridName}>Сотрудник</Text>
+        {dates.map(date => <View key={date} style={[styles.gridHeading, { width: cellWidth }]}>
+          <Text style={styles.label}>{weekdays[asDate(date).getUTCDay()]} {Number(date.slice(8))}</Text>
+        </View>)}
+        <Text style={styles.gridTotal}>Итого</Text>
       </View>
-      {!!shift && <View style={styles.shiftRates}>
-        <RateBreakdown work={shift} />
-        <WeldingMarks shift={shift} />
-        <Text style={[styles.pill, shift.status === 'closed' && styles.pillClosed]}>
-          {shift.status === 'closed' ? 'Закрыта' : 'Учтена'}
-        </Text>
-      </View>}
-    </>
-  );
-  if (!shift && !canEdit) return <View style={styles.shiftRow}>{info}</View>;
-  return <Pressable accessibilityRole="button" accessibilityLabel={worker.name + ', ' + title + (extra > 0 ? ', переработка ' + hours(extra) + ', ' + rateText(shift) : '')}
-    onPress={onOpen} style={({ pressed }) => [styles.shiftRow, objectMark, pressed && styles.pressed]}>{info}</Pressable>;
+      {data.workers.map(worker => {
+        const entries = dates.map(date => shifts.get(worker.id + ':' + date));
+        return <View style={styles.gridRow} key={worker.id}>
+          <Text style={styles.gridName}>{worker.name}</Text>
+          {dates.map((date, index) => {
+            const shift = entries[index];
+            const project = projects.get(shift?.project_id);
+            const label = shift?.kind === 'work' ? hours(shift.minutes) : kinds[shift?.kind] ?? '—';
+            const enabled = date.startsWith(data.month) && (shift || data.canEdit);
+            return <Pressable key={date} accessibilityRole="button"
+              accessibilityLabel={worker.name + ', ' + dateFormat.format(asDate(date)) + ', ' + label}
+              disabled={busy || !enabled} onPress={() => onOpen({ worker, shift, day: date })}
+              style={[styles.gridCell, { width: cellWidth, height: cellWidth }, project && { borderLeftColor: project.color, borderLeftWidth: 4 }]}>
+              <Text style={styles.label}>{label}</Text>
+              {project && <Text style={styles.muted} numberOfLines={1}>{project.name}</Text>}
+              <WeldingMarks shift={shift} />
+              {shift && <RateBreakdown work={shift} />}
+            </Pressable>;
+          })}
+          <View style={styles.gridTotal}>
+            <Text style={styles.label}>{hours(entries.reduce((sum, shift) => sum + (shift?.minutes ?? 0), 0))}</Text>
+            {weldingTypes.map(({ key, label }) => <Text style={styles.muted} key={key}>
+              {label} {entries.filter(shift => shift?.[key]).length}
+            </Text>)}
+          </View>
+        </View>;
+      })}
+    </View>
+  </ScrollView>;
 }
 
 function timeInput(value) {
@@ -506,6 +554,8 @@ function DirectoryEditor({ data, mode, employee, busy, onSave, onDismiss }) {
 
 function Workspace({ session, onLogout }) {
   const [data, setData] = useState(null);
+  const [menu, setMenu] = useState(false);
+  const [page, setPage] = useState('Табель');
   const [day, setDay] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -611,40 +661,35 @@ function Workspace({ session, onLogout }) {
     {error && <Button title="Выйти" onPress={() => onLogout()} />}
   </View>;
 
-  const shifts = new Map(data.shifts.filter(shift => shift.date === day).map(shift => [shift.worker_id, shift]));
-  const projects = new Map(data.projects.map(project => [project.id, project]));
   return (
     <View style={styles.fill}>
       <View style={styles.header}>
+        <Button title="☰" label="Меню" compact onPress={() => setMenu(!menu)} />
         <View style={styles.fill}>
           <Text style={styles.headerName}>{data.user.name}</Text>
           <Text style={styles.headerRole}>{roles[data.user.role]}</Text>
         </View>
         <Button title="Выйти" disabled={busy} onPress={() => run(() => onLogout())} />
       </View>
-      <FlatList
-        contentContainerStyle={styles.list}
-        data={data.workers}
-        keyExtractor={worker => String(worker.id)}
-        refreshControl={<RefreshControl refreshing={busy} onRefresh={() => run(() => refresh())} />}
-        ListHeaderComponent={
-          <>
-            <ErrorMessage message={error} />
-            {data.user.role === 'hr' && <View style={styles.actions}>
-              <Button title="Сотрудники" disabled={busy} onPress={() => setDirectoryMode('employees')} />
-              <Button title="Добавить особую дату" disabled={busy} onPress={() => setDirectoryMode('calendar')} />
-            </View>}
-            <MonthHeader data={data} day={day} setDay={selectDay} busy={busy} onClose={confirmClose}
-              onShare={() => run(share)} />
-          </>
-        }
-        ListEmptyComponent={<Text style={styles.muted}>Нет назначенных сотрудников.</Text>}
-        renderItem={({ item: worker }) => {
-          const shift = shifts.get(worker.id);
-          return <ShiftRow worker={worker} shift={shift} project={projects.get(shift?.project_id)}
-            canEdit={data.canEdit} onOpen={() => { if (!busy) setItem({ worker, shift, day }); }} />;
-        }}
-      />
+      {menu && <View style={styles.menu}>
+        {['Табель', 'Карточка сотрудника', 'Заявления'].map(name => <Button key={name} title={name}
+          selected={page === name} onPress={() => { setPage(name); setMenu(false); }} />)}
+      </View>}
+      {page === 'Табель' ? <ScrollView contentContainerStyle={styles.list} nestedScrollEnabled
+        refreshControl={<RefreshControl refreshing={busy} onRefresh={() => run(() => refresh())} />}>
+        <ErrorMessage message={error} />
+        {data.user.role === 'hr' && <View style={styles.actions}>
+          <Button title="Сотрудники" disabled={busy} onPress={() => setDirectoryMode('employees')} />
+          <Button title="Добавить особую дату" disabled={busy} onPress={() => setDirectoryMode('calendar')} />
+        </View>}
+        <MonthHeader data={data} day={day} setDay={selectDay} busy={busy} onClose={confirmClose}
+          onShare={() => run(share)} />
+        {data.workers.length ? <WeekGrid data={data} day={day} busy={busy} onOpen={setItem} /> :
+          <Text style={styles.muted}>Нет назначенных сотрудников.</Text>}
+      </ScrollView> : <View style={styles.editor}>
+        <Text accessibilityRole="header" style={styles.title}>{page}</Text>
+        <Text style={styles.muted}>Раздел в разработке.</Text>
+      </View>}
       {directoryMode === 'employees' && <Modal visible onRequestClose={() => setDirectoryMode(null)}>
         <SafeAreaView style={styles.screen}>
           <FlatList data={data.employees ?? []} keyExtractor={employee => String(employee.id)}
@@ -668,22 +713,75 @@ function Workspace({ session, onLogout }) {
   );
 }
 
+function DevicePin({ setup, onSubmit, onReset }) {
+  const [pin, setPin] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    if (busy || !/^\d{4}$/.test(pin)) return;
+    if (setup && pin !== repeat) { setError('PIN-коды не совпадают.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await onSubmit(pin);
+    } catch (problem) {
+      setPin('');
+      setError(problem.message);
+      if (problem.resetPin) await onReset();
+    } finally { setBusy(false); }
+  }
+  return <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.loginContent}>
+      <View style={styles.loginCard}>
+        <Text accessibilityRole="header" style={styles.title}>{setup ? 'Придумайте PIN' : 'Введите PIN'}</Text>
+        <Field label="Четыре цифры" value={pin} onChangeText={value => setPin(value.replace(/\D/g, ''))}
+          secureTextEntry keyboardType="number-pad" maxLength={4} editable={!busy} />
+        {setup && <Field label="Повторите PIN" value={repeat} onChangeText={value => setRepeat(value.replace(/\D/g, ''))}
+          secureTextEntry keyboardType="number-pad" maxLength={4} editable={!busy} />}
+        <ErrorMessage message={error} />
+        <Button title={setup ? 'Сохранить PIN' : 'Войти'} primary disabled={busy || pin.length !== 4 || (setup && repeat.length !== 4)} onPress={submit} />
+        <Button title="Начать заново" disabled={busy} onPress={onReset} />
+      </View>
+    </ScrollView>
+  </KeyboardAvoidingView>;
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
+  const [device, setDevice] = useState(null);
+  const [pending, setPending] = useState(null);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     readSession().then(previous => {
-      if (previous?.token) setSession(previous);
+      if (previous?.deviceKey) setDevice(previous);
+      else if (previous?.token) setSession(previous);
     }).catch(() => {}).finally(() => setReady(true));
   }, []);
-  async function login(auth) {
+  async function login(auth, sms) {
+    if (sms) { setPending(auth); return; }
     await saveSession(auth);
     setSession(auth);
   }
+  async function setupPin(pin) {
+    const { deviceKey } = await api(pending, 'auth/pin/enroll', { pin });
+    await saveSession({ address: serverAddress, deviceKey });
+    setDevice({ deviceKey });
+    setSession(pending);
+    setPending(null);
+  }
+  async function unlock(pin) {
+    const result = await api({}, 'auth/pin/unlock', { deviceKey: device.deviceKey, pin });
+    setSession({ ...result, address: serverAddress });
+  }
   async function logout(notifyServer = true) {
+    const active = session || pending;
     await clearSession();
     setSession(null);
-    if (notifyServer) await api(session, 'logout', {}).catch(() => {});
+    setDevice(null);
+    setPending(null);
+    if (notifyServer && device?.deviceKey) await api({}, 'auth/pin/forget', { deviceKey: device.deviceKey }).catch(() => {});
+    else if (notifyServer && active) await api(active, 'logout', {}).catch(() => {});
   }
   return (
     <SafeAreaProvider>
@@ -691,7 +789,9 @@ export default function App() {
         <StatusBar barStyle="dark-content" />
         {!ready ? <View style={styles.loading}><ActivityIndicator size="large" color={colors.primary} /></View> :
           session ? <Workspace session={session} onLogout={logout} /> :
-            <Login onLogin={login} />}
+          pending || device ? <DevicePin key={pending ? 'setup' : 'unlock'} setup={Boolean(pending)}
+            onSubmit={pending ? setupPin : unlock} onReset={() => logout()} /> :
+          <Login onLogin={login} />}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -704,6 +804,13 @@ const colors = {
   red: '#a01f2d', redBg: '#fae9ec'
 };
 const styles = StyleSheet.create({
+  menu: { alignSelf: 'flex-start', backgroundColor: '#fff', padding: 8, gap: 4, marginLeft: 8 },
+  grid: { backgroundColor: '#fff', borderRadius: 10 },
+  gridRow: { flexDirection: 'row', alignItems: 'stretch' },
+  gridHeading: { padding: 7, alignItems: 'center', borderBottomWidth: 1, borderColor: '#dbe3ef' },
+  gridName: { width: 144, padding: 8, alignSelf: 'center', fontWeight: '700', color: '#172843' },
+  gridTotal: { width: 100, padding: 6, justifyContent: 'center' },
+  gridCell: { padding: 4, justifyContent: 'center', borderWidth: 0.5, borderColor: '#dbe3ef', gap: 2, overflow: 'hidden' },
   screen: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1, minWidth: 0 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
@@ -730,7 +837,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: colors.nav, paddingHorizontal: 16, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerName: { color: colors.surface, fontSize: 15, fontWeight: '700' },
   headerRole: { color: colors.navText, fontSize: 13 },
-  list: { padding: 16, width: '100%', maxWidth: 720, alignSelf: 'center', gap: 8 },
+  list: { padding: 16, width: '100%', maxWidth: 1600, alignSelf: 'center', gap: 8 },
   stack: { gap: 12, marginBottom: 8 },
   titleBlock: { gap: 4 },
   period: { flexDirection: 'row', alignItems: 'center', gap: 10 },

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { buildTimesheet } from './src/timesheet-xlsx.js';
 import { readFileSync } from 'node:fs';
 import { openStore, seedDemo, hashPassword, checkPassword, localDate, roles, statuses, kinds, projectColors } from './src/store.js';
@@ -13,7 +13,10 @@ const secure = externalOrigin?.startsWith('https://');
 const cookie = secure ? '__Host-tabel' : 'tabel';
 const db = openStore(demo);
 if (demo) seedDemo(db);
-const duration = 12 * 60 * 60;
+const duration = 30 * 24 * 60 * 60;
+const smsKey = process.env.TABEL_SMS_RU_API_ID;
+const authKey = process.env.TABEL_AUTH_KEY;
+const smsEnabled = Boolean(smsKey && authKey?.length >= 32 && secure && !demo);
 const fallbackPassword = await hashPassword(randomBytes(32).toString('hex'));
 const limits = new Map();
 
@@ -174,7 +177,7 @@ function data(user, month) {
   const projects = user.role === 'worker' ? allProjects.filter(project => projectIds.has(project.id)) : allProjects;
   const hr = user.role === 'hr';
   const staff = hr ? db.prepare("SELECT id,name,role FROM users WHERE role IN ('master','foreman','engineer') ORDER BY name").all() : [];
-  const employees = hr ? db.prepare('SELECT id,username,name,role,grade FROM users ORDER BY name').all() : [];
+  const employees = hr ? db.prepare('SELECT id,username,name,role,grade,phone,position FROM users ORDER BY name').all() : [];
   if (hr) {
     const workerById = new Map(workers.map(worker => [worker.id, worker]));
     workers.forEach(worker => { worker.supervisor_ids = []; });
@@ -375,11 +378,115 @@ async function login(req, res, body, previous, mobile) {
     && body.username.length <= 40 && body.password.length <= 128, 400, 'Проверьте логин и пароль.');
   const name = body.username.trim();
   limitLogin(req, name);
-  const user = db.prepare('SELECT id,password FROM users WHERE username=?').get(name);
+  const user = db.prepare('SELECT id,password FROM users WHERE username=? AND phone IS NULL').get(name);
   const valid = await checkPassword(body.password, user?.password ?? fallbackPassword);
   requireThat(valid && user?.password, 401, 'Неверный логин или пароль.');
   limits.delete('user:' + name.toLowerCase());
   return json(res, setSession(res, user, previous, mobile));
+}
+
+function normalizePhone(value) {
+  const digits = typeof value === 'string' && /^[+0-9 ()-]{10,25}$/.test(value)
+    ? value.replace(/\D/g, '') : '';
+  if (/^[78]\d{10}$/.test(digits)) return '+7' + digits.slice(1);
+  if (/^9\d{9}$/.test(digits)) return '+7' + digits;
+  return null;
+}
+
+function authVerifier(id, code) {
+  return createHmac('sha256', authKey).update(id + ':' + code).digest('hex');
+}
+
+function matchesVerifier(saved, current) {
+  return timingSafeEqual(Buffer.from(saved, 'hex'), Buffer.from(current, 'hex'));
+}
+
+async function requestSms(req, body) {
+  requireThat(smsEnabled, 503, 'Вход по SMS пока недоступен.');
+  const phone = normalizePhone(body.phone);
+  requireThat(phone, 400, 'Введите номер телефона в формате +7.');
+  limitLogin(req, 'sms:' + phone);
+  const now = Date.now();
+  const id = randomBytes(32).toString('hex');
+  const code = String(randomInt(100000, 1000000));
+  const user = db.prepare('SELECT id FROM users WHERE phone=?').get(phone);
+  transaction(() => {
+    db.prepare('DELETE FROM sms_challenges WHERE created<?').run(now - 86400000);
+    const recent = db.prepare('SELECT count(*) AS count,max(created) AS latest FROM sms_challenges WHERE phone=?').get(phone);
+    const total = db.prepare('SELECT count(*) AS count FROM sms_challenges WHERE created>? AND user_id IS NOT NULL').get(now - 3600000).count;
+    requireThat(recent.count < 6 && now - (recent.latest ?? 0) >= 60000 && total < 35,
+      429, 'Достигнут лимит запросов. Попробуйте позже.');
+    db.prepare('INSERT INTO sms_challenges(id,user_id,phone,verifier,created,expires,remaining) VALUES(?,?,?,?,?,?,?)')
+      .run(id, user?.id ?? null, phone, authVerifier(id, code), now, now + 300000, 5);
+  });
+  if (user) {
+    try {
+      const form = new URLSearchParams({ api_id: smsKey, to: phone.slice(1), msg: 'Код входа в Табель: ' + code, json: '1' });
+      if (process.env.TABEL_SMS_FROM) form.set('from', process.env.TABEL_SMS_FROM);
+      const response = await fetch('https://sms.ru/sms/send', { method: 'POST', body: form, signal: AbortSignal.timeout(8000) });
+      const result = await response.json();
+      if (!response.ok || result.status !== 'OK' || result.sms?.[phone.slice(1)]?.status !== 'OK') throw new Error();
+      transaction(() => {
+        db.prepare('UPDATE sms_challenges SET ready=1 WHERE id=?').run(id);
+        db.prepare('UPDATE sms_challenges SET ready=0 WHERE phone=? AND id<>? AND created<=?').run(phone, id, now);
+      });
+    } catch {
+      console.warn('SMS provider did not accept a login message.');
+    }
+  }
+  return { challenge: id };
+}
+
+function verifySms(body) {
+  requireThat(smsEnabled, 503, 'Вход по SMS пока недоступен.');
+  requireThat(typeof body.challenge === 'string' && /^[a-f0-9]{64}$/.test(body.challenge)
+    && typeof body.code === 'string' && /^\d{6}$/.test(body.code), 400, 'Введите код из шести цифр.');
+  const id = body.challenge;
+  const user = transaction(() => {
+    const challenge = db.prepare('SELECT * FROM sms_challenges WHERE id=? AND expires>? AND ready=1 AND remaining>0').get(id, Date.now());
+    if (!challenge) return null;
+    db.prepare('UPDATE sms_challenges SET remaining=remaining-1 WHERE id=?').run(id);
+    if (!matchesVerifier(challenge.verifier, authVerifier(id, body.code))) return null;
+    db.prepare('UPDATE sms_challenges SET ready=0 WHERE id=?').run(id);
+    return db.prepare('SELECT id FROM users WHERE id=? AND phone=?').get(challenge.user_id, challenge.phone);
+  });
+  requireThat(user, 401, 'Код неверен или истёк. При необходимости запросите новый.');
+  return user;
+}
+
+function enrollPin(user, body) {
+  requireThat(smsEnabled && typeof body.pin === 'string' && /^\d{4}$/.test(body.pin), 400, 'Выберите PIN из четырёх цифр.');
+  requireThat(db.prepare('SELECT phone FROM users WHERE id=?').get(user.id)?.phone, 403, 'Сначала войдите по SMS.');
+  const key = randomBytes(32).toString('hex');
+  transaction(() => {
+    db.prepare('DELETE FROM trusted_devices WHERE expires<=? OR session_digest=?').run(Date.now(), user.digest);
+    db.prepare('INSERT INTO trusted_devices VALUES(?,?,?,?,?,?)')
+      .run(digest(key), user.id, authVerifier(key, body.pin), Date.now() + duration * 1000, 5, user.digest);
+  });
+  return { deviceKey: key };
+}
+
+function unlockPin(res, body) {
+  requireThat(smsEnabled && typeof body.deviceKey === 'string' && /^[a-f0-9]{64}$/.test(body.deviceKey)
+    && typeof body.pin === 'string' && /^\d{4}$/.test(body.pin), 400, 'Введите PIN из четырёх цифр.');
+  const key = digest(body.deviceKey);
+  const result = transaction(() => {
+    const device = db.prepare('SELECT * FROM trusted_devices WHERE digest=? AND expires>? AND remaining>0').get(key, Date.now());
+    if (!device) return null;
+    if (!matchesVerifier(device.verifier, authVerifier(body.deviceKey, body.pin))) {
+      db.prepare('UPDATE trusted_devices SET remaining=remaining-1 WHERE digest=?').run(key);
+      return { remaining: device.remaining - 1 };
+    }
+    const token = randomBytes(32).toString('hex');
+    const expires = Date.now() + duration * 1000;
+    db.prepare('DELETE FROM mobile_sessions WHERE digest=?').run(device.session_digest);
+    db.prepare('INSERT INTO mobile_sessions VALUES(?,?,?)').run(digest(token), device.user_id, expires);
+    db.prepare('UPDATE trusted_devices SET session_digest=?,remaining=5,expires=? WHERE digest=?').run(digest(token), expires, key);
+    return { token, expires };
+  });
+  if (!result || result.remaining === 0) return json(res, { error: 'Войдите повторно по SMS.', resetPin: true }, 401);
+  if (!result.token) return json(res, { error: 'Неверный PIN. Осталось попыток: ' + result.remaining }, 401);
+  return json(res, result);
 }
 
 function validateAssignments(ids) {
@@ -396,33 +503,40 @@ function writeAssignments(worker, ids) {
 }
 
 async function saveUser(res, body, actor, id = null) {
-  const { username, name, password, grade } = body;
-  const existing = id === null ? null : db.prepare('SELECT role FROM users WHERE id=?').get(id);
+  const { name, password, grade } = body;
+  const existing = id === null ? null : db.prepare('SELECT role,phone,position,username FROM users WHERE id=?').get(id);
+  const phone = body.phone === undefined ? existing?.phone ?? null : normalizePhone(body.phone);
+  requireThat(body.phone === undefined || phone, 400, 'Укажите номер телефона в формате +7.');
+  const position = body.position === undefined ? existing?.position ?? null : body.position;
+  requireThat(position === null || (typeof position === 'string' && position.length <= 120), 400, 'Проверьте должность.');
+  const username = body.username || (phone ? existing?.username || 'employee-' + randomBytes(9).toString('hex') : '');
   requireThat(id === null || existing, 404, 'Сотрудник не найден.');
   const role = existing?.role ?? body.role;
   requireThat(typeof username === 'string' && /^[a-z0-9._-]{3,40}$/i.test(username) && Object.hasOwn(roles, role), 400, 'Укажите роль и логин из 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний.');
   requireThat(typeof name === 'string' && name.trim().length > 1 && name.trim().length <= 120, 400, 'Укажите имя сотрудника.');
   const keepPassword = existing && (password === undefined || password === '');
-  requireThat(keepPassword || (typeof password === 'string' && password.length >= 12 && password.length <= 128), 400, 'Пароль должен содержать от 12 до 128 символов.');
+  requireThat(phone || keepPassword || (typeof password === 'string' && password.length >= 12 && password.length <= 128), 400, 'Пароль должен содержать от 12 до 128 символов.');
   const worker = role === 'worker';
   requireThat(!worker || grade === null || (Number.isInteger(grade) && grade >= 1 && grade <= 8), 400, 'Укажите разряд от 1 до 8.');
-  const hash = keepPassword ? null : await hashPassword(password);
+  const hash = phone || keepPassword ? null : await hashPassword(password);
   try {
     transaction(() => {
+      if (phone) requireThat(!db.prepare('SELECT id FROM users WHERE phone=?').all(phone).some(account => account.id !== id), 409, 'Этот номер уже привязан к другому сотруднику.');
       const ids = worker && (!existing || body.supervisor_ids !== undefined)
         ? validateAssignments(body.supervisor_ids ?? []) : null;
       if (existing) {
-        db.prepare('UPDATE users SET username=?,name=?,grade=?,password=COALESCE(?,password) WHERE id=?')
-          .run(username, name.trim(), worker ? grade : null, hash, id);
-        if (hash) {
+        db.prepare('UPDATE users SET username=?,name=?,grade=?,password=CASE WHEN ? IS NOT NULL THEN NULL ELSE COALESCE(?,password) END,phone=?,position=? WHERE id=?')
+          .run(username, name.trim(), worker ? grade : null, phone, hash, phone, position?.trim() ?? null, id);
+        if (hash || phone !== existing.phone) {
+          db.prepare('DELETE FROM trusted_devices WHERE user_id=?').run(id);
           for (const table of ['sessions', 'mobile_sessions']) {
             db.prepare(`DELETE FROM ${table} WHERE user_id=? AND digest<>?`).run(id, actor.digest);
           }
         }
         if (ids) writeAssignments(id, ids);
       } else {
-        const result = db.prepare('INSERT INTO users(username,name,role,password,grade) VALUES(?,?,?,?,?)')
-          .run(username, name.trim(), role, hash, worker ? grade : null);
+        const result = db.prepare('INSERT INTO users(username,name,role,password,grade,phone,position) VALUES(?,?,?,?,?,?,?)')
+          .run(username, name.trim(), role, hash, worker ? grade : null, phone, position?.trim() ?? null);
         if (ids) writeAssignments(result.lastInsertRowid, ids);
       }
     });
@@ -488,8 +602,24 @@ async function handle(req, res) {
   }
   const user = session(req, mobile);
   if (method === 'GET' && path === '/api/session') {
-    return json(res, { user: user ? { id: user.id, name: user.name, role: user.role } : null, today: localDate(), demo });
+    return json(res, { user: user ? { id: user.id, name: user.name, role: user.role } : null, today: localDate(), demo, smsEnabled });
   }
+  if (method === 'POST' && path === '/api/auth/sms/request') return json(res, await requestSms(req, await readJson(req)));
+  if (method === 'POST' && path === '/api/auth/sms/verify') {
+    const account = verifySms(await readJson(req));
+    return json(res, setSession(res, account, user, mobile));
+  }
+  if (mobile && method === 'POST' && path === '/api/auth/pin/unlock') return unlockPin(res, await readJson(req));
+  if (mobile && method === 'POST' && path === '/api/auth/pin/forget') {
+    const { deviceKey } = await readJson(req);
+    requireThat(typeof deviceKey === 'string' && /^[a-f0-9]{64}$/.test(deviceKey), 400, 'Устройство не найдено.');
+    transaction(() => {
+      const removed = db.prepare('DELETE FROM trusted_devices WHERE digest=? RETURNING session_digest').get(digest(deviceKey));
+      if (removed) db.prepare('DELETE FROM mobile_sessions WHERE digest=?').run(removed.session_digest);
+    });
+    return json(res, { ok: true });
+  }
+  if (mobile && user && method === 'POST' && path === '/api/auth/pin/enroll') return json(res, enrollPin(user, await readJson(req)));
   if (method === 'POST' && path === '/api/login') return login(req, res, await readJson(req), user, mobile);
   if (method === 'POST' && path === '/api/demo' && demo && !mobile) {
     const { role } = await readJson(req);
@@ -499,7 +629,10 @@ async function handle(req, res) {
     return json(res, { ok: true });
   }
   if (method === 'POST' && path === '/api/logout') {
-    if (user) db.prepare(mobile ? 'DELETE FROM mobile_sessions WHERE digest=?' : 'DELETE FROM sessions WHERE digest=?').run(user.digest);
+    if (user) transaction(() => {
+      db.prepare(mobile ? 'DELETE FROM mobile_sessions WHERE digest=?' : 'DELETE FROM sessions WHERE digest=?').run(user.digest);
+      if (mobile) db.prepare('DELETE FROM trusted_devices WHERE session_digest=?').run(user.digest);
+    });
     if (!mobile) setCookie(res, '', 0);
     return json(res, { ok: true });
   }
