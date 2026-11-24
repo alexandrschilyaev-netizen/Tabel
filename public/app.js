@@ -164,7 +164,7 @@ async function load(month = state.month, day = state.day) {
 }
 
 async function enter() {
-  const session = await api('session');
+  const [session] = await Promise.all([api('session'), launchComplete]);
   state.session = session;
   $('#startup').hidden = true;
   $('#login').hidden = Boolean(session.user);
@@ -1119,4 +1119,6 @@ window.addEventListener('beforeinstallprompt', event => { event.preventDefault()
 window.addEventListener('online', connection);
 window.addEventListener('offline', connection);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-enter().catch(() => { $('#startup').textContent = 'Нет связи с сервером. Проверьте подключение и обновите страницу.'; });
+const launchComplete = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? Promise.resolve() :
+  new Promise(resolve => setTimeout(resolve, 1340));
+enter().catch(() => { $('#launch-status').textContent = 'Нет связи с сервером. Проверьте подключение и обновите страницу.'; });

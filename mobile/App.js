@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable,
+  ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable,
   RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { api, clearSession, readSession, saveSession, serverAddress } from './api';
+import { BrandLaunch } from './BrandLaunch';
+import { brandMark } from './brand-mark';
 
 const roles = { worker: 'Монтажник', master: 'Мастер', foreman: 'Прораб', engineer: 'Инженер', hr: 'Кадровик' };
 const kinds = { work: 'Работа', vacation: 'Отпуск', sick: 'Больничный', dayoff: 'Выходной' };
@@ -110,7 +112,10 @@ function Login({ onLogin }) {
     <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.loginContent}>
         <View style={styles.loginCard}>
-          <Text style={styles.brandName}>Табель</Text>
+          <View style={styles.companySignature}>
+            <Image source={brandMark} style={styles.brandMark} resizeMode="contain" />
+            <Text style={styles.brandName}>Группа «ПРИВОД»</Text>
+          </View>
           <Text accessibilityRole="header" style={styles.title}>Вход в приложение</Text>
           {checked && (useSms ? <>
             <Field label="Номер телефона" value={phone} onChangeText={setPhone} keyboardType="phone-pad"
@@ -752,6 +757,7 @@ export default function App() {
   const [device, setDevice] = useState(null);
   const [pending, setPending] = useState(null);
   const [ready, setReady] = useState(false);
+  const [launchDone, setLaunchDone] = useState(false);
   useEffect(() => {
     readSession().then(previous => {
       if (previous?.deviceKey) setDevice(previous);
@@ -783,11 +789,12 @@ export default function App() {
     if (notifyServer && device?.deviceKey) await api({}, 'auth/pin/forget', { deviceKey: device.deviceKey }).catch(() => {});
     else if (notifyServer && active) await api(active, 'logout', {}).catch(() => {});
   }
+  const launching = !ready || !launchDone;
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.screen}>
-        <StatusBar barStyle="dark-content" />
-        {!ready ? <View style={styles.loading}><ActivityIndicator size="large" color={colors.primary} /></View> :
+      <SafeAreaView style={[styles.screen, launching && styles.launchBackground]}>
+        <StatusBar barStyle={launching ? 'light-content' : 'dark-content'} />
+        {launching ? <BrandLaunch onComplete={setLaunchDone} /> :
           session ? <Workspace session={session} onLogout={logout} /> :
           pending || device ? <DevicePin key={pending ? 'setup' : 'unlock'} setup={Boolean(pending)}
             onSubmit={pending ? setupPin : unlock} onReset={() => logout()} /> :
@@ -798,8 +805,8 @@ export default function App() {
 }
 
 const colors = {
-  bg: '#f3f6fb', surface: '#fff', ink: '#172843', muted: '#54647b', primary: '#254fc5',
-  line: '#dbe3ef', border: '#8294af', soft: '#edf2ff', nav: '#14233d', navText: '#c8d6eb',
+  bg: '#f2f7f4', surface: '#fff', ink: '#142c24', muted: '#4e6459', primary: '#257045',
+  line: '#d5e2d9', border: '#829b90', soft: '#e7f3eb', nav: '#034730', navText: '#cce5d8',
   green: '#176344', greenBg: '#e1f4ec', closed: '#2c4fa1', closedBg: '#e8efff',
   red: '#a01f2d', redBg: '#fae9ec'
 };
@@ -807,15 +814,18 @@ const styles = StyleSheet.create({
   menu: { alignSelf: 'flex-start', backgroundColor: '#fff', padding: 8, gap: 4, marginLeft: 8 },
   grid: { backgroundColor: '#fff', borderRadius: 10 },
   gridRow: { flexDirection: 'row', alignItems: 'stretch' },
-  gridHeading: { padding: 7, alignItems: 'center', borderBottomWidth: 1, borderColor: '#dbe3ef' },
-  gridName: { width: 144, padding: 8, alignSelf: 'center', fontWeight: '700', color: '#172843' },
+  gridHeading: { padding: 7, alignItems: 'center', borderBottomWidth: 1, borderColor: '#d5e2d9' },
+  gridName: { width: 144, padding: 8, alignSelf: 'center', fontWeight: '700', color: '#142c24' },
   gridTotal: { width: 100, padding: 6, justifyContent: 'center' },
-  gridCell: { padding: 4, justifyContent: 'center', borderWidth: 0.5, borderColor: '#dbe3ef', gap: 2, overflow: 'hidden' },
+  gridCell: { padding: 4, justifyContent: 'center', borderWidth: 0.5, borderColor: '#d5e2d9', gap: 2, overflow: 'hidden' },
   screen: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1, minWidth: 0 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   loginContent: { flexGrow: 1, justifyContent: 'center', padding: 18, alignItems: 'center' },
   loginCard: { width: '100%', maxWidth: 450, padding: 22, backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.line, gap: 14 },
+  launchBackground: { backgroundColor: '#0b251c' },
+  companySignature: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  brandMark: { width: 42, height: 44 },
   brandName: { color: colors.primary, fontWeight: '800', fontSize: 16 },
   title: { color: colors.ink, fontSize: 28, fontWeight: '800', letterSpacing: -0.8 },
   heading: { color: colors.ink, fontSize: 19, fontWeight: '750' },

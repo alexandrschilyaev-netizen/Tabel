@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#14233d">
+  <meta name="theme-color" content="#034730">
   <title>Табель — учёт рабочего времени</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/icon-192.png">
@@ -15,10 +15,36 @@
 <body>
   <a class="skip" href="#main">К содержимому</a>
   <noscript>Для работы с табелем включите JavaScript.</noscript>
-  <div id="startup" class="center" role="status">Открываем табель…</div>
+  <div id="startup" class="center launch" role="status">
+    <div class="launch-panel">
+      <div class="launch-stage" aria-hidden="true">
+        <div class="launch-circuit">
+          <div class="launch-unit launch-plc">
+            <span class="launch-unit-title">ПЛК</span>
+            <span class="launch-inputs"><b></b><b></b><b></b><b></b></span>
+            <span class="launch-ports"></span>
+          </div>
+          <div class="launch-wire"><span></span></div>
+          <div class="launch-unit launch-drive">
+            <span class="launch-unit-title">ЧРП</span>
+            <span class="launch-display"><b>50,0</b> <small>Гц</small></span>
+            <span class="launch-vents"></span>
+          </div>
+        </div>
+        <div class="launch-lockup">
+          <span class="launch-mark"><img src="/icons/privod.png" width="48" height="48" alt=""></span>
+          <div><span>ГРУППА «ПРИВОД»</span><strong>Табель</strong></div>
+        </div>
+      </div>
+      <p id="launch-status">Открываем табель…</p>
+    </div>
+  </div>
   <section id="login" class="login center" aria-labelledby="login-title" hidden>
     <div class="login-card">
-      <img src="/icons/icon-192.png" width="56" height="56" alt="">
+      <div class="company-signature">
+        <img src="/icons/privod.png" width="42" height="44" alt="">
+        <span>Группа «ПРИВОД»</span>
+      </div>
       <h1 id="login-title">Вход в Табель</h1>
       <button id="passkey-login" class="primary" type="button" hidden>Войти с ключом доступа</button>
       <p id="passkey-error" class="error" role="alert" hidden></p>
@@ -68,7 +94,7 @@
 
     <div class="workspace">
       <header class="topbar">
-        <div class="trail"><button id="menu-toggle" type="button" aria-label="Меню" aria-controls="side-menu" aria-expanded="false"><span data-icon="grid"></span></button><span>Рабочее пространство</span><span class="slash">/</span><strong id="trail-page">Табель</strong></div>
+        <div class="trail"><button id="menu-toggle" type="button" aria-label="Меню" aria-controls="side-menu" aria-expanded="false"><span data-icon="grid"></span></button><span>Рабочее пространство</span><span class="slash">/</span><img class="trail-mark" src="/icons/privod.png" width="23" height="24" alt="Группа «ПРИВОД»"><strong id="trail-page">Табель</strong></div>
         <div class="top-account">
           <span id="demo-tag" class="demo-tag" hidden>Демо</span>
           <span id="user-avatar" class="avatar account-avatar" aria-hidden="true"></span>
