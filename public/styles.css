@@ -212,7 +212,7 @@ dialog::backdrop { background: #0b1930a8 }
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important }
 }
 
-.worker-view [data-page]:not([data-page="tabel"]), .worker-view .filters > label { display: none }
+.worker-view [data-page="workers"], .worker-view [data-page="projects"], .worker-view [data-page="calendar"], .worker-view .filters > label { display: none }
 .worker-view .stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
 @media (max-width: 860px) {
   .worker-view .sidebar nav { display: none }
@@ -315,7 +315,6 @@ main { padding-top: 16px; }
   position: static; display: grid; grid-template-columns: 1fr; margin: 0; padding: 0; gap: 3px;
 }
 .sidebar nav button { flex-direction: row; justify-content: flex-start; text-align: left; font-size: .875rem; padding: 7px 10px; }
-.worker-view [data-page="profile"], .worker-view [data-page="requests"] { display: inline-flex; }
 #menu-toggle { border-color: transparent; padding: 6px 10px; }
 #pending-title { font-size: 1.45rem; margin-bottom: 8px; }
 #test-login-toggle { margin: 10px 0 0; width: 100%; }
