@@ -171,6 +171,10 @@ async function enter() {
   $('#app').hidden = !session.user;
   $('#app').classList.toggle('worker-view', session.user?.role === 'worker');
   $('#demo-login').hidden = !session.demo;
+  const passkeyAvailable = session.passkeyEnabled && globalThis.SimpleWebAuthnBrowser?.browserSupportsWebAuthn();
+  $('#passkey-login').hidden = !passkeyAvailable;
+  $('#passkeys-manage').hidden = !session.passkeyEnabled;
+  alertIn($('#passkey-error'), '');
   if (!session.user) {
     $('#sms-form').hidden = !session.smsEnabled;
     $('#test-login-toggle').hidden = !session.smsEnabled;
@@ -866,6 +870,79 @@ $('#status-filter').innerHTML = option('', 'Все статусы') + Object.ent
 $('#month-filter').innerHTML = monthNames.map((name, i) => option(String(i + 1).padStart(2, '0'), name)).join('');
 $('#year-filter').innerHTML = Array.from({ length: 100 }, (_, i) => option(2000 + i, 2000 + i)).join('');
 $('#legend').innerHTML = Object.entries(statuses).map(([key, label]) => '<span><i class="dot status-' + key + '" aria-hidden="true"></i>' + label + '</span>').join('');
+function passkeyError(error) {
+  if (error.name === 'NotAllowedError' || error.code === 'ERROR_PASSTHROUGH_SEE_CAUSE_PROPERTY') {
+    return 'Операция отменена или на устройстве нет подходящего ключа.';
+  }
+  return error.message;
+}
+
+$('#passkey-login').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  alertIn($('#passkey-error'), '');
+  try {
+    const { id, options } = await api('auth/passkeys/login/options', {});
+    const response = await globalThis.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
+    await api('auth/passkeys/login/verify', { id, response });
+    await enter();
+  } catch (error) {
+    alertIn($('#passkey-error'), passkeyError(error));
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function openPasskeys() {
+  const keys = await api('auth/passkeys');
+  const supported = globalThis.SimpleWebAuthnBrowser?.browserSupportsWebAuthn();
+  const entries = keys.map(key => '<li><div><strong>' + safe(key.label) + '</strong><small>Добавлен ' +
+    new Date(key.created).toLocaleDateString('ru') + '</small></div><button type="button" data-remove-passkey="' +
+    safe(key.id) + '" aria-label="' + safe('Удалить ' + key.label) + '">Удалить</button></li>').join('');
+  openDialog('Ключи доступа', '', '<p>Добавляйте ключи на доверенных устройствах. Удаление отключает вход по этому ключу.</p>' +
+    (entries ? '<ul class="passkey-list">' + entries + '</ul>' : '<p>Ключей доступа пока нет.</p>') +
+    (supported ? '<form class="editor-form" id="passkey-add">' +
+      field('Название ключа', 'label', 'maxlength="60" placeholder="Например, рабочий ноутбук"') +
+      '<button type="submit" class="primary">Добавить ключ доступа</button></form>' :
+      '<p>Этот браузер не поддерживает создание ключей доступа.</p>') + errorMarkup +
+    '<div class="dialog-actions"><button type="button" class="close-dialog">Готово</button></div>');
+  const errorBox = editor.querySelector('.error');
+  async function update(action) {
+    lockEditor(true);
+    alertIn(errorBox, '');
+    try {
+      await action();
+      await openPasskeys();
+    } catch (error) {
+      alertIn(errorBox, passkeyError(error));
+    } finally {
+      lockEditor(false);
+    }
+  }
+  editor.querySelector('#passkey-add')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const label = event.currentTarget.elements.label.value;
+    update(async () => {
+      const { id, options } = await api('auth/passkeys/register/options', {});
+      const response = await globalThis.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
+      await api('auth/passkeys/register/verify', { id, label, response });
+    });
+  });
+  editor.querySelectorAll('[data-remove-passkey]').forEach(button => {
+    button.addEventListener('click', () => {
+      if (window.confirm('Удалить этот ключ доступа?')) {
+        update(() => api('auth/passkeys/remove', { id: button.dataset.removePasskey }));
+      }
+    });
+  });
+}
+
+$('#passkeys-manage').addEventListener('click', async () => {
+  toggleMenu(false);
+  try { await openPasskeys(); }
+  catch (error) { notice(error.message, true); }
+});
+
 const smsForm = $('#sms-form');
 let smsChallenge = null;
 

@@ -325,3 +325,8 @@ main { padding-top: 16px; }
   .schedule-mobile, .day-selector { display: none; }
   main { padding-bottom: 28px; }
 }
+
+#passkey-login { width: 100%; margin: 10px 0 6px; }
+.passkey-list { list-style: none; padding: 0; margin: 12px 0; }
+.passkey-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.passkey-list small { display: block; color: var(--muted); }

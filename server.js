@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { passkeyService } from './src/passkeys.js';
 import { buildTimesheet } from './src/timesheet-xlsx.js';
 import { readFileSync } from 'node:fs';
 import { openStore, seedDemo, hashPassword, checkPassword, localDate, roles, statuses, kinds, projectColors } from './src/store.js';
@@ -14,6 +15,9 @@ const cookie = secure ? '__Host-tabel' : 'tabel';
 const db = openStore(demo);
 if (demo) seedDemo(db);
 const duration = 30 * 24 * 60 * 60;
+const localOrigin = externalOrigin && new URL(externalOrigin).hostname === 'localhost';
+const passkeys = !demo && (secure || localOrigin)
+  ? passkeyService(db, externalOrigin, duration * 1000, requireThat) : null;
 const smsKey = process.env.TABEL_SMS_RU_API_ID;
 const authKey = process.env.TABEL_AUTH_KEY;
 const smsEnabled = Boolean(smsKey && authKey?.length >= 32 && secure && !demo);
@@ -30,7 +34,10 @@ const assets = {
   '/icons/icon-192.png': ['icons/icon-192.png', 'image/png'],
   '/icons/icon-512.png': ['icons/icon-512.png', 'image/png']
 };
-for (const asset of Object.values(assets)) asset.push(readFileSync(new URL('./public/' + asset[0], import.meta.url)));
+assets['/webauthn.js'] = [null, 'text/javascript; charset=utf-8', readFileSync(
+  new URL('./node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js', import.meta.url)
+)];
+for (const asset of Object.values(assets).filter(asset => asset[0])) asset.push(readFileSync(new URL('./public/' + asset[0], import.meta.url)));
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -359,12 +366,12 @@ function exportCsv(res, user, month) {
   res.end('\uFEFF' + rows.map(row => row.map(csvCell).join(';')).join('\r\n') + '\r\n');
 }
 
-function limitLogin(req, name) {
+function limitLogin(req, name, userLimit = 10) {
   const address = req.socket.remoteAddress;
   const now = Date.now();
   for (const [key, entry] of limits) if (entry.until <= now) limits.delete(key);
   requireThat(limits.size < 10000, 429, 'Попробуйте войти позже.');
-  const buckets = [['ip:' + address, 100], ['user:' + name.toLowerCase(), 10]];
+  const buckets = [['ip:' + address, 100], ['user:' + name.toLowerCase(), userLimit]];
   for (const [key, threshold] of buckets) requireThat((limits.get(key)?.count ?? 0) < threshold, 429, 'Слишком много попыток. Повторите через 10 минут.');
   for (const [key] of buckets) {
     const entry = limits.get(key) ?? { count: 0, until: now + 600000 };
@@ -602,7 +609,24 @@ async function handle(req, res) {
   }
   const user = session(req, mobile);
   if (method === 'GET' && path === '/api/session') {
-    return json(res, { user: user ? { id: user.id, name: user.name, role: user.role } : null, today: localDate(), demo, smsEnabled });
+    return json(res, { user: user ? { id: user.id, name: user.name, role: user.role } : null, today: localDate(), demo, smsEnabled, passkeyEnabled: !mobile && Boolean(passkeys) });
+  }
+  if (!mobile && path.startsWith('/api/auth/passkeys')) {
+    requireThat(passkeys, 404, 'Ключи доступа недоступны.');
+    if (method === 'POST' && path === '/api/auth/passkeys/login/options') {
+      limitLogin(req, 'passkey:' + req.socket.remoteAddress, 60);
+      return json(res, await passkeys.authenticationOptions());
+    }
+    if (method === 'POST' && path === '/api/auth/passkeys/login/verify') {
+      const account = await passkeys.authenticate(await readJson(req));
+      return json(res, setSession(res, account, user));
+    }
+    requireThat(user, 401, 'Войдите в приложение.');
+    if (method === 'GET' && path === '/api/auth/passkeys') return json(res, passkeys.list(user.id));
+    if (method === 'POST' && path === '/api/auth/passkeys/register/options') return json(res, await passkeys.registrationOptions(user));
+    if (method === 'POST' && path === '/api/auth/passkeys/register/verify') return json(res, await passkeys.register(await readJson(req, 65536), user));
+    if (method === 'POST' && path === '/api/auth/passkeys/remove') return json(res, passkeys.remove(user, (await readJson(req)).id));
+    throw new HttpError(404, 'Действие не найдено.');
   }
   if (method === 'POST' && path === '/api/auth/sms/request') return json(res, await requestSms(req, await readJson(req)));
   if (method === 'POST' && path === '/api/auth/sms/verify') {

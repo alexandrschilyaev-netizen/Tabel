@@ -144,6 +144,16 @@ export function openStore(demo = false) {
         remaining INTEGER NOT NULL, ready INTEGER NOT NULL DEFAULT 0
       ) STRICT;
       CREATE INDEX IF NOT EXISTS sms_challenges_phone ON sms_challenges(phone,created);
+      CREATE TABLE IF NOT EXISTS web_passkeys (
+        id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        public_key BLOB NOT NULL, counter INTEGER NOT NULL,
+        label TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS web_passkeys_user ON web_passkeys(user_id);
+      CREATE TABLE IF NOT EXISTS passkey_requests (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, challenge TEXT NOT NULL,
+        session_digest TEXT, expires INTEGER NOT NULL
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS trusted_devices (
         digest TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), verifier TEXT NOT NULL,
         expires INTEGER NOT NULL, remaining INTEGER NOT NULL, session_digest TEXT

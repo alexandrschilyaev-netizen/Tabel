@@ -1,4 +1,4 @@
-const cacheName = 'tabel-shell-v3';
+const cacheName = 'tabel-shell-v4';
 const offlinePage = '/offline.html';
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(cacheName).then(cache => cache.addAll([offlinePage, '/styles.css', '/icons/icon-192.png'])));

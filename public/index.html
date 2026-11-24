@@ -9,6 +9,7 @@
   <link rel="icon" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/styles.css">
+  <script defer src="/webauthn.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -19,6 +20,8 @@
     <div class="login-card">
       <img src="/icons/icon-192.png" width="56" height="56" alt="">
       <h1 id="login-title">Вход в Табель</h1>
+      <button id="passkey-login" class="primary" type="button" hidden>Войти с ключом доступа</button>
+      <p id="passkey-error" class="error" role="alert" hidden></p>
       <form id="sms-form" hidden>
         <label>Номер телефона<input name="phone" type="tel" autocomplete="tel" placeholder="+7" required></label>
         <label id="sms-code-field" hidden>Код из SMS<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label>
@@ -52,6 +55,7 @@
       <nav id="navigation" aria-label="Разделы">
         <button data-page="tabel" aria-current="page"><span data-icon="calendar"></span>Табель</button>
         <button data-page="profile"><span data-icon="users"></span>Карточка сотрудника</button>
+        <button id="passkeys-manage" type="button" hidden><span data-icon="check"></span>Ключи доступа</button>
         <button data-page="requests"><span data-icon="note"></span>Заявления</button>
         <button data-page="workers"><span data-icon="users"></span>Сотрудники</button>
         <button data-page="calendar" hidden><span data-icon="calendar"></span>Праздники</button>
