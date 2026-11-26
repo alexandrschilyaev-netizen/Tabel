@@ -164,8 +164,9 @@ async function load(month = state.month, day = state.day) {
 }
 
 async function enter() {
-  const [session] = await Promise.all([api('session'), launchComplete]);
+  const session = await api('session');
   state.session = session;
+  $('#session-status').hidden = true;
   $('#startup').hidden = true;
   $('#login').hidden = Boolean(session.user);
   $('#app').hidden = !session.user;
@@ -205,6 +206,23 @@ async function enter() {
   notice('');
   await load(session.today.slice(0, 7), session.today);
   connection();
+}
+
+async function signIn(request) {
+  const login = $('#login');
+  const splash = $('#startup');
+  login.hidden = true;
+  splash.hidden = false;
+  const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? Promise.resolve()
+    : new Promise(resolve => setTimeout(resolve, 1340));
+  try {
+    await Promise.all([request(), animation]);
+    await enter();
+  } finally {
+    splash.hidden = true;
+    login.hidden = !$('#app').hidden;
+  }
 }
 
 function render() {
@@ -319,13 +337,15 @@ function renderSchedule() {
       const hasHandle = fillCell && shift && shift.status !== 'closed';
       const handle = hasHandle ? '<button type="button" class="fill-handle" data-fill-source="' + shift.id +
         '" title="Протянуть вправо или вниз" aria-label="' + safe('Заполнить диапазон: ' + worker.name + ', ' + dayLabel(date)) + '"><span></span></button>' : '';
-      return '<td' + fillCell + '><button type="button" class="shift-cell ' + (shift ? 'status-' + shift.status : 'empty') +
+      const remove = canEdit && shift && shift.status !== 'closed' ? '<button type="button" class="shift-remove" data-shift-remove="' + shift.id +
+        '" title="Удалить запись" aria-label="' + safe('Удалить запись: ' + worker.name + ', ' + dayLabel(date)) + '">' + svg('close') + '</button>' : '';
+      return '<td' + (remove ? ' class="shift-removable"' : '') + fillCell + '><button type="button" class="shift-cell ' + (shift ? 'status-' + shift.status : 'empty') +
         (hasHandle ? ' has-fill' : '') + '" data-worker="' + worker.id + '" data-date="' + date + '"' + colorAttr(project?.color) +
         ' aria-label="' + safe(worker.name + ', ' + dayLabel(date) + ', ' + label) + '" title="' + safe(label) + '">' +
         (work ? '<span class="shift-main"><strong>' + hours(shift.minutes) + '</strong><small>' + safe(project?.name) + '</small>' +
           (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') + weldingDots(shift) + '</span>' +
           '<span class="shift-rates">' + rateBadges(shift) + '</span>'
-          : shift ? '<small>' + kinds[shift.kind] + '</small>' + (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') : '—') + '</button>' + handle + '</td>';
+          : shift ? '<small class="shift-kind">' + kinds[shift.kind] + '</small>' + (shift.note ? '<small class="comment-mark">' + icon('note') + '</small>' : '') : '—') + '</button>' + handle + remove + '</td>';
     }).join('');
     return '<tr><th scope="row">' + person(worker, workerCaption(worker)) + '</th>' + cells +
       '<td class="week-total">' + hours(total) + '<span class="rate-stack">' + rateBadges(rates) + '</span>' +
@@ -402,13 +422,13 @@ function selectField(label, name, options, attributes = '') {
 const errorMarkup = '<p class="error" role="alert" hidden></p>';
 const cancel = '<button type="button" class="close-dialog">Отмена</button>';
 
-function bindForm(form, save, success) {
+function bindForm(form, save, success, pending = 'Сохраняем…') {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const submit = form.querySelector('button[type=submit]');
     const initial = submit.textContent;
     lockEditor(true);
-    submit.textContent = 'Сохраняем…';
+    submit.textContent = pending;
     const errorBox = form.querySelector('.error');
     alertIn(errorBox, '');
     try {
@@ -450,7 +470,9 @@ function openShift(workerId, date) {
       '><i class="dot ' + key + '" aria-hidden="true"></i>' + label + '</label>').join('') + '</fieldset>' +
     '<label class="check"><input name="overnight" type="checkbox"' + (shift?.overnight ? ' checked' : '') + '>Смена заканчивается на следующий день</label><p class="rate-preview" data-overtime role="status" hidden></p></div>' +
     '<label>Комментарий<textarea name="note" aria-label="Комментарий" rows="2" maxlength="500">' + safe(shift?.note) + '</textarea></label>' +
-    errorMarkup + '<div class="dialog-actions">' + cancel + '<button class="primary" type="submit">Сохранить запись</button></div></form>' +
+    errorMarkup + '<div class="dialog-actions">' +
+    (shift ? '<button class="danger" type="button" data-shift-remove="' + shift.id + '">Удалить запись</button>' : '') +
+    cancel + '<button class="primary" type="submit">Сохранить запись</button></div></form>' +
     (shift && fillAvailable() ? '<button type="button" data-fill-picker="' + shift.id + '">Заполнить диапазон</button>' : '') +
     (shift ? historyMarkup() : '')
   );
@@ -491,6 +513,19 @@ function openShift(workerId, date) {
   if (shift) bindHistory(shift);
 }
 
+function confirmShiftRemoval(id) {
+  const shift = state.data?.shifts.find(item => item.id === id);
+  if (!shift || !state.data.canEdit || shift.status === 'closed') return;
+  const worker = state.data.workers.find(item => item.id === shift.worker_id);
+  openDialog('Удалить запись?', worker.name + ' · ' + dayLabel(shift.date),
+    '<form class="editor-form"><p>Ячейка станет пустой. Итоги табеля будут пересчитаны.</p>' + errorMarkup +
+    '<div class="dialog-actions">' + cancel + '<button class="danger" type="submit">Удалить запись</button></div></form>');
+  const form = editor.querySelector('form');
+  form.querySelector('.close-dialog').focus();
+  bindForm(form, () => api('shifts/' + shift.id + '/delete', { version: shift.version }),
+    'Запись удалена.', 'Удаляем…');
+}
+
 function historyMarkup() {
   return '<details class="history"><summary>История изменений</summary><div class="history-body" aria-live="polite"></div></details>';
 }
@@ -507,7 +542,7 @@ function bindHistory(shift) {
     body.textContent = 'Загружаем…';
     try {
       const events = await api('shifts/' + shift.id + '/history');
-      const labels = { created: 'Создание', edited: 'Изменение', filled: 'Заполнение из смены', submit: 'Отправка', approve: 'Согласование', return: 'Возврат', close: 'Закрытие', month_closed: 'Закрытие месяца' };
+      const labels = { created: 'Создание', edited: 'Изменение', deleted: 'Удаление', filled: 'Заполнение из смены', submit: 'Отправка', approve: 'Согласование', return: 'Возврат', close: 'Закрытие', month_closed: 'Закрытие месяца' };
       body.innerHTML = events.length ? '<ul>' + events.map(e => {
         const time = timestamp(e.created_at);
         return '<li>' + safe(time + ' · ' + e.name + ' · ' + labels[e.action] + (e.detail ? ' · ' + e.detail : '')) + '</li>';
@@ -887,8 +922,7 @@ $('#passkey-login').addEventListener('click', async event => {
   try {
     const { id, options } = await api('auth/passkeys/login/options', {});
     const response = await globalThis.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
-    await api('auth/passkeys/login/verify', { id, response });
-    await enter();
+    await signIn(() => api('auth/passkeys/login/verify', { id, response }));
   } catch (error) {
     alertIn($('#passkey-error'), passkeyError(error));
   } finally {
@@ -974,10 +1008,9 @@ smsForm.addEventListener('submit', async event => {
   submit.disabled = true;
   try {
     if (smsChallenge) {
-      await api('auth/sms/verify', { challenge: smsChallenge, code: smsForm.elements.code.value.trim() });
+      await signIn(() => api('auth/sms/verify', { challenge: smsChallenge, code: smsForm.elements.code.value.trim() }));
       smsForm.reset();
       resetSms();
-      await enter();
     } else {
       const reply = await api('auth/sms/request', { phone: smsForm.elements.phone.value });
       smsChallenge = reply.challenge;
@@ -1020,9 +1053,8 @@ $('#login-form').addEventListener('submit', async event => {
   const errorBox = form.querySelector('.error');
   alertIn(errorBox, '');
   try {
-    await api('login', { username: form.elements.username.value, password: form.elements.password.value });
+    await signIn(() => api('login', { username: form.elements.username.value, password: form.elements.password.value }));
     form.reset();
-    await enter();
   } catch (error) {
     alertIn(errorBox, error.message);
   } finally {
@@ -1034,7 +1066,7 @@ $('#demo-login').addEventListener('click', async event => {
   if (!button) return;
   const buttons = [...$('#demo-login').querySelectorAll('button')];
   buttons.forEach(item => { item.disabled = true; });
-  try { await api('demo', { role: button.dataset.demo }); await enter(); }
+  try { await signIn(() => api('demo', { role: button.dataset.demo })); }
   catch (error) { alertIn($('#login-form .error'), error.message); }
   finally { buttons.forEach(item => { item.disabled = false; }); }
 });
@@ -1063,6 +1095,8 @@ window.addEventListener('hashchange', () => {
 });
 $('#editor').addEventListener('click', event => {
   if (event.target.closest('.close-dialog')) editor.close();
+  const shiftRemove = event.target.closest('[data-shift-remove]');
+  if (shiftRemove) confirmShiftRemoval(Number(shiftRemove.dataset.shiftRemove));
   const remove = event.target.closest('[data-calendar-remove]');
   if (remove) openCalendarEditor(calendarEntries.find(day => day.date === remove.dataset.calendarRemove), true);
   const picker = event.target.closest('[data-fill-picker]');
@@ -1113,6 +1147,11 @@ $('#day-selector').addEventListener('click', event => {
 });
 for (const id of ['#search', '#project-filter', '#status-filter']) $(id).addEventListener('input', () => state.data && renderSchedule());
 for (const id of ['#schedule-desktop', '#schedule-mobile']) $(id).addEventListener('click', event => {
+  const remove = event.target.closest('[data-shift-remove]');
+  if (remove) {
+    confirmShiftRemoval(Number(remove.dataset.shiftRemove));
+    return;
+  }
   const button = event.target.closest('[data-worker]');
   if (button) openShift(Number(button.dataset.worker), button.dataset.date);
 });
@@ -1122,6 +1161,4 @@ window.addEventListener('beforeinstallprompt', event => { event.preventDefault()
 window.addEventListener('online', connection);
 window.addEventListener('offline', connection);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-const launchComplete = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? Promise.resolve() :
-  new Promise(resolve => setTimeout(resolve, 1340));
-enter().catch(() => { $('#launch-status').textContent = 'Нет связи с сервером. Проверьте подключение и обновите страницу.'; });
+enter().catch(() => { $('#session-status').textContent = 'Нет связи с сервером. Проверьте подключение и обновите страницу.'; });

@@ -15,7 +15,8 @@
 <body>
   <a class="skip" href="#main">К содержимому</a>
   <noscript>Для работы с табелем включите JavaScript.</noscript>
-  <div id="startup" class="center launch" role="status">
+  <p id="session-status" class="center" role="status">Проверяем сессию…</p>
+  <div id="startup" class="center launch" role="status" hidden>
     <div class="launch-panel">
       <div class="launch-stage" aria-hidden="true">
         <div class="launch-circuit">
@@ -31,7 +32,7 @@
           <div><span>ГРУППА «ПРИВОД»</span><strong>Табель</strong></div>
         </div>
       </div>
-      <p id="launch-status">Открываем табель…</p>
+      <p class="launch-status">Открываем табель…</p>
     </div>
   </div>
   <section id="login" class="login center" aria-labelledby="login-title" hidden>

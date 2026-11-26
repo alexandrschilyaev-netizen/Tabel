@@ -96,6 +96,7 @@ input::placeholder { color: var(--muted) }
 .month-filter { display: flex; gap: 6px }
 .month-filter select { width: auto }
 .schedule-desktop { overflow-x: auto }
+.schedule-desktop table { min-width: 900px }
 table { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed }
 .schedule-desktop th:first-child { width: 23%; text-align: left; padding-left: 18px }
 .schedule-desktop th:last-child { width: 9% }
@@ -113,8 +114,9 @@ tbody th { font-weight: 650 }
 .person small { color: var(--muted); display: block; line-height: 1.25; margin-top: 3px }
 .week-total { color: var(--text); font-size: .87rem; font-weight: 720; font-variant-numeric: tabular-nums }
 .shift-cell { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 3px; border-color: transparent; font-variant-numeric: tabular-nums; line-height: 1.14; min-height: 48px; border-radius: 8px }
-.shift-cell strong { font-size: .86rem }
-.shift-cell small { font-weight: 580; font-size: .71rem; max-width: 100%; overflow-wrap: anywhere }
+.shift-cell strong { font-size: 1.05rem }
+.shift-cell small { font-weight: 580; font-size: .8rem; max-width: 100%; overflow-wrap: anywhere }
+.shift-cell .shift-kind { font-size: .91rem; font-weight: 650 }
 .shift-cell.empty { color: var(--muted); background: transparent; border: 1px dashed transparent }
 .shift-cell.empty:hover, .shift-cell.empty:focus-visible { border-color: var(--input); background: var(--soft) }
 .shift-cell:hover { filter: brightness(.96) }
@@ -145,6 +147,8 @@ dialog::backdrop { background: #0b2119a8 }
 #work-fields, #worker-fields { display: grid; gap: 10px }
 #editor-body > p + p { margin-top: 12px }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; margin-top: 6px }
+.danger { color: var(--danger) }
+.danger:hover { color: var(--danger); border-color: var(--danger); background: #fae9ec }
 .error { color: var(--danger); font-size: .87rem }
 .details { margin: 0 0 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
 .details dt { color: var(--muted); font-size: .8rem }
@@ -245,8 +249,18 @@ dialog::backdrop { background: #0b2119a8 }
 input[type=color] { width: 78px; height: 46px; padding: 5px; cursor: pointer }
 [data-fill-picker] { margin-top: 12px }
 #fill-hint { margin: 0; padding: 1px 16px 9px; color: var(--muted); font-size: .83rem }
-.schedule-desktop td[data-fill-row] { position: relative }
-.shift-cell.has-fill { padding-right: 17px }
+.schedule-desktop td[data-fill-row], .shift-removable { position: relative }
+.shift-cell.has-fill { padding-bottom: 14px }
+.shift-remove {
+  position: absolute; inset: 2px 2px auto auto; width: 26px; height: 26px; min-height: 0; padding: 5px;
+  z-index: 1; color: var(--danger); border-color: var(--line); border-radius: 6px;
+  opacity: 0; pointer-events: none;
+}
+.shift-removable:focus-within .shift-remove { opacity: 1; pointer-events: auto }
+@media (any-hover: hover) {
+  .shift-removable:hover .shift-remove { opacity: 1; pointer-events: auto }
+}
+.shift-remove:hover { color: var(--danger); border-color: var(--danger); background: #fae9ec }
 .fill-handle {
   display: grid; place-items: center; position: absolute; inset: auto 2px 2px auto;
   width: 24px; height: 24px; min-height: 0; padding: 0; border: 0;
@@ -262,7 +276,7 @@ input[type=color] { width: 78px; height: 46px; padding: 5px; cursor: pointer }
 .shift-cell:has(.shift-rates) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 3px; text-align: left; }
 .shift-main { display: flex; flex-direction: column; min-width: 0; align-items: flex-start; }
 .shift-rates { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; text-align: right; }
-.shift-cell .shift-rates .rate-badge { font-size: .66rem; padding-inline: 2px; }
+.shift-cell .shift-rates .rate-badge { font-size: .7rem; padding-inline: 2px; }
 .shift-cell .shift-rates { max-width: 48px; }
 .comment-mark { color: var(--muted); display: inline-flex; align-items: center; gap: 3px; }
 .comment-mark [data-icon] { width: 14px; height: 14px; flex-basis: 14px; }
@@ -320,7 +334,6 @@ main { padding-top: 16px; }
 #test-login-toggle { margin: 10px 0 0; width: 100%; }
 @media (max-width: 860px) {
   .schedule-desktop { display: block; }
-  .schedule-desktop table { min-width: 720px; }
   .schedule-desktop th:first-child { position: sticky; left: 0; z-index: 1; background: var(--card); }
   .schedule-mobile, .day-selector { display: none; }
   main { padding-bottom: 28px; }
@@ -372,7 +385,8 @@ main { padding-top: 16px; }
 .launch-mark img { object-fit: contain; }
 .launch-lockup span:not(.launch-mark) { color: #a3e2ae; font-size: .73rem; font-weight: 750; letter-spacing: .1em; }
 .launch-lockup strong { display: block; color: #fff; font-size: 2.12rem; font-weight: 750; line-height: 1.16; }
-#launch-status { font-size: .88rem; }
+.launch-status { font-size: .88rem; }
+#session-status { margin: 0; text-align: center; color: var(--muted); }
 @keyframes launch-circuit {
   0% { opacity: .35; transform: translateY(5px); }
   15%, 91% { opacity: 1; transform: translateY(0); }

@@ -180,7 +180,7 @@ function data(user, month) {
   const calendar = calendarDays(month);
   const special = new Map(calendar.map(day => [day.date, day]));
   const shifts = db.prepare(`SELECT s.* FROM shifts s JOIN users u ON u.id=s.worker_id
-    WHERE ${where} AND s.date BETWEEN ? AND ? ORDER BY s.date,s.worker_id`).all(id, month + '-01', month + '-31')
+    WHERE ${where} AND s.deleted=0 AND s.date BETWEEN ? AND ? ORDER BY s.date,s.worker_id`).all(id, month + '-01', month + '-31')
     .map(shift => withOvertime(shift, dayRule(shift.date, special.get(shift.date), !lock || lock.calendar_policy === 1)));
   const allProjects = db.prepare('SELECT * FROM projects ORDER BY id').all();
   const projectIds = new Set(shifts.map(shift => shift.project_id));
@@ -250,7 +250,8 @@ function requireEditor(user) {
 
 function writeShift(user, cell, values, { replace = true, source = null } = {}) {
   requireThat(visible(user, cell.worker_id), 403, 'У вас нет доступа к этому сотруднику.');
-  const current = db.prepare('SELECT * FROM shifts WHERE worker_id=? AND date=?').get(cell.worker_id, cell.date);
+  const previous = db.prepare('SELECT * FROM shifts WHERE worker_id=? AND date=?').get(cell.worker_id, cell.date);
+  const current = previous?.deleted ? null : previous;
   requireThat((current?.version ?? 0) === cell.version, 409, 'Табель изменился. Обновите его и повторите действие.');
   requireThat(!current || replace, 409, 'В диапазоне уже есть записи. Подтвердите их замену.');
   requireThat(current?.status !== 'closed', 409, 'В диапазоне есть закрытая смена.');
@@ -264,9 +265,9 @@ function writeShift(user, cell, values, { replace = true, source = null } = {}) 
   });
   const note = source ? (current?.note ?? '') : cell.note.trim();
   let saved;
-  if (current) {
+  if (previous) {
     saved = db.prepare(`UPDATE shifts SET project_id=?,kind=?,start=?,end=?,overnight=?,break_minutes=?,minutes=?,note=?,welding=?,zinc_welding=?,
-      version=version+1 WHERE id=? RETURNING *`).get(...values, note, ...marks, current.id);
+      status=?,deleted=0,version=version+1 WHERE id=? RETURNING *`).get(...values, note, ...marks, current?.status ?? 'approved', previous.id);
   } else {
     saved = db.prepare(`INSERT INTO shifts(worker_id,date,project_id,kind,start,end,overnight,break_minutes,minutes,note,welding,zinc_welding,status)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'approved') RETURNING *`).get(cell.worker_id, cell.date, ...values, note, ...marks);
@@ -284,13 +285,27 @@ function saveShift(user, body) {
   });
 }
 
+function deleteShift(user, id, { version }) {
+  requireEditor(user);
+  requireThat(Number.isSafeInteger(id) && Number.isSafeInteger(version) && version > 0, 400, 'Проверьте запись для удаления.');
+  return transaction(() => {
+    const shift = db.prepare('SELECT worker_id,date,status,version,deleted FROM shifts WHERE id=?').get(id);
+    requireThat(shift && visible(user, shift.worker_id), 404, 'Запись не найдена.');
+    requireThat(!shift.deleted && shift.version === version, 409, 'Запись уже изменилась. Обновите табель.');
+    requireThat(shift.status !== 'closed' && !monthLock(shift.date.slice(0, 7)), 409, 'Закрытую смену удалить нельзя.');
+    db.prepare('UPDATE shifts SET deleted=1,version=version+1 WHERE id=?').run(id);
+    logShift(id, user.id, 'deleted');
+    return { ok: true };
+  });
+}
+
 function fillShifts(user, body) {
   requireEditor(user);
   const { source_id: sourceId, source_version: sourceVersion, direction, targets } = body;
   requireThat(Number.isSafeInteger(sourceId) && Number.isSafeInteger(sourceVersion) && ['right', 'down'].includes(direction)
     && Array.isArray(targets) && targets.length > 0 && targets.length <= 1000, 400, 'Выберите диапазон для заполнения.');
   return transaction(() => {
-    const source = db.prepare('SELECT * FROM shifts WHERE id=?').get(sourceId);
+    const source = db.prepare('SELECT * FROM shifts WHERE id=? AND deleted=0').get(sourceId);
     requireThat(source && visible(user, source.worker_id), 404, 'Исходная смена не найдена.');
     requireThat(source.version === sourceVersion, 409, 'Исходная смена изменилась. Обновите табель.');
     const month = source.date.slice(0, 7);
@@ -324,9 +339,9 @@ function closeMonth(user, body) {
     const period = [month + '-01', month + '-31'];
     db.prepare('INSERT INTO month_locks(month,closed_by,calendar_policy) VALUES(?,?,1)').run(month, user.id);
     db.prepare(`UPDATE shifts SET status='closed',version=version+1
-      WHERE date BETWEEN ? AND ? AND status<>'closed'`).run(...period);
+      WHERE date BETWEEN ? AND ? AND status<>'closed' AND deleted=0`).run(...period);
     db.prepare(`INSERT INTO events(shift_id,actor_id,action,detail)
-      SELECT id,?,'month_closed',? FROM shifts WHERE date BETWEEN ? AND ?`).run(user.id, month, ...period);
+      SELECT id,?,'month_closed',? FROM shifts WHERE date BETWEEN ? AND ? AND deleted=0`).run(user.id, month, ...period);
     return monthLock(month);
   });
 }
@@ -682,6 +697,10 @@ async function handle(req, res) {
   }
   if (method === 'POST' && path === '/api/shifts/fill') return json(res, fillShifts(user, await readJson(req, 131072)));
   if (method === 'POST' && path === '/api/shifts') return json(res, saveShift(user, await readJson(req)));
+  const shiftDeletePath = path.match(/^\/api\/shifts\/(\d+)\/delete$/);
+  if (method === 'POST' && shiftDeletePath) {
+    return json(res, deleteShift(user, Number(shiftDeletePath[1]), await readJson(req)));
+  }
   if (method === 'POST' && path === '/api/months/close') return json(res, closeMonth(user, await readJson(req)));
   if (method === 'GET' && path === '/api/calendar') {
     requireThat(user.role === 'hr', 403, 'Справочник доступен кадровику.');
@@ -700,7 +719,7 @@ async function handle(req, res) {
   const shiftPath = path.match(/^\/api\/shifts\/(\d+)\/history$/);
   if (method === 'GET' && shiftPath) {
     const id = Number(shiftPath[1]);
-    const shift = db.prepare('SELECT worker_id FROM shifts WHERE id=?').get(id);
+    const shift = db.prepare('SELECT worker_id FROM shifts WHERE id=? AND deleted=0').get(id);
     requireThat(shift && visible(user, shift.worker_id), 404, 'Запись не найдена.');
     return json(res, db.prepare(`SELECT e.action,e.created_at,e.detail,u.name FROM events e
       JOIN users u ON u.id=e.actor_id WHERE e.shift_id=? ORDER BY e.id DESC LIMIT 50`).all(id));

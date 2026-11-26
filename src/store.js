@@ -165,6 +165,9 @@ export function openStore(demo = false) {
         db.exec(`ALTER TABLE shifts ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0 CHECK(${column} IN (0,1));`);
       }
     }
+    if (!shiftColumns.has('deleted')) {
+      db.exec('ALTER TABLE shifts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1));');
+    }
     const marker = db.prepare("INSERT OR IGNORE INTO app_migrations VALUES('legacy_holidays_2026')").run();
     if (marker.changes) {
       const insert = db.prepare("INSERT OR IGNORE INTO calendar_days(date,kind,name) VALUES(?,'holiday',?)");

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable,
+  ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable,
   RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -41,7 +41,7 @@ function initials(name) {
   return name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
 }
 
-function Button({ title, onPress, disabled, primary = false, selected, label, compact = false, markColor }) {
+function Button({ title, onPress, disabled, primary = false, selected, label, compact = false, markColor, danger = false }) {
   const active = primary || selected;
   return (
     <Pressable
@@ -51,7 +51,7 @@ function Button({ title, onPress, disabled, primary = false, selected, label, co
         pressed && styles.pressed, disabled && styles.disabled]}
     >
       {markColor && <View style={[styles.projectDot, { backgroundColor: markColor }]} />}
-      <Text style={[styles.buttonText, active && styles.buttonTextPrimary]}>{title}</Text>
+      <Text style={[styles.buttonText, danger && styles.buttonTextDanger, active && styles.buttonTextPrimary]}>{title}</Text>
     </Pressable>
   );
 }
@@ -73,7 +73,35 @@ function ErrorMessage({ message }) {
   return <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{message}</Text>;
 }
 
+function useLoginSplash() {
+  const [playing, setPlaying] = useState(false);
+  const finish = useRef(null);
+  const complete = useCallback(() => {
+    finish.current?.();
+    finish.current = null;
+  }, []);
+  async function run(task) {
+    const animation = new Promise(resolve => { finish.current = resolve; });
+    Keyboard.dismiss();
+    setPlaying(true);
+    try {
+      const result = await task();
+      await animation;
+      return result;
+    } finally {
+      complete();
+      setPlaying(false);
+    }
+  }
+  const splash = playing ? <View style={styles.fill}>
+    <StatusBar barStyle="light-content" />
+    <BrandLaunch onComplete={complete} />
+  </View> : null;
+  return [splash, run];
+}
+
 function Login({ onLogin }) {
+  const [splash, animateLogin] = useLoginSplash();
   const [sms, setSms] = useState(false);
   const [usePhone, setUsePhone] = useState(false);
   const [phone, setPhone] = useState('');
@@ -87,8 +115,9 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const incomplete = useSms ? challenge ? code.length !== 6 : !phone.trim() : !username.trim() || !password;
   async function submit() {
-    if (busy) return;
+    if (busy || incomplete) return;
     setBusy(true);
     setError('');
     try {
@@ -97,9 +126,12 @@ function Login({ onLogin }) {
         setChallenge(result.challenge);
         return;
       }
-      const auth = useSms ? await api({}, 'auth/sms/verify', { challenge, code })
-        : await api({}, 'login', { username: username.trim(), password });
-      if (!auth.token || !auth.expires) throw new Error('Сервер не поддерживает вход из мобильного приложения.');
+      const auth = await animateLogin(async () => {
+        const result = useSms ? await api({}, 'auth/sms/verify', { challenge, code })
+          : await api({}, 'login', { username: username.trim(), password });
+        if (!result.token || !result.expires) throw new Error('Сервер не поддерживает вход из мобильного приложения.');
+        return result;
+      });
       await onLogin({ address: serverAddress, token: auth.token, expires: auth.expires }, useSms);
     } catch (problem) {
       setError(problem.message);
@@ -107,6 +139,7 @@ function Login({ onLogin }) {
       setBusy(false);
     }
   }
+  if (splash) return splash;
   return (
     <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.loginContent}>
@@ -134,7 +167,7 @@ function Login({ onLogin }) {
           </>}
           <ErrorMessage message={error} />
           <Button title={busy ? 'Подождите…' : useSms && !challenge ? 'Получить код' : 'Войти'} primary onPress={submit}
-            disabled={busy || (useSms ? challenge ? code.length !== 6 : !phone.trim() : !username.trim() || !password)} />
+            disabled={busy || incomplete} />
           {sms && <Button title={useSms ? 'Войти по паролю' : 'Войти по SMS'} disabled={busy} onPress={() => { setUsePhone(!usePhone); setError(''); }} />}
         </View>
       </ScrollView>
@@ -217,9 +250,10 @@ function rateText(work) {
   return rateParts(work).map(([rate, minutes]) => hours(minutes) + ' ×' + rate).join(' · ');
 }
 
-function RateBreakdown({ work }) {
+function RateBreakdown({ work, compact = false }) {
   return rateParts(work).map(([rate, minutes]) => (
-    <Text key={rate} style={[styles.rate, rate === '1,5' && styles.rate15, rate === '2' && styles.rate20]}>
+    <Text key={rate} numberOfLines={compact ? 1 : undefined} adjustsFontSizeToFit={compact} minimumFontScale={.78}
+      style={[styles.rate, rate === '1,5' && styles.rate15, rate === '2' && styles.rate20]}>
       {hours(minutes)} ×{rate}
     </Text>
   ));
@@ -235,10 +269,10 @@ function WeldingMarks({ shift, labels = false }) {
     </View>)}</View>;
 }
 
-function WeekGrid({ data, day, onOpen, busy }) {
+function WeekGrid({ data, day, onOpen, onDelete, busy }) {
   const { width } = useWindowDimensions();
   const dates = daysInWeek(day);
-  const cellWidth = Math.max(68, Math.floor((Math.min(width, 1600) - 276) / 7));
+  const cellWidth = Math.max(94, Math.floor((Math.min(width, 1600) - 276) / 7));
   const shifts = new Map(data.shifts.map(shift => [shift.worker_id + ':' + shift.date, shift]));
   const projects = new Map(data.projects.map(project => [project.id, project]));
   return <ScrollView horizontal style={styles.grid} keyboardShouldPersistTaps="handled">
@@ -259,14 +293,18 @@ function WeekGrid({ data, day, onOpen, busy }) {
             const project = projects.get(shift?.project_id);
             const label = shift?.kind === 'work' ? hours(shift.minutes) : kinds[shift?.kind] ?? '—';
             const enabled = date.startsWith(data.month) && (shift || data.canEdit);
+            const removable = enabled && data.canEdit && shift && shift.status !== 'closed';
+            const item = { worker, shift, day: date };
             return <Pressable key={date} accessibilityRole="button"
               accessibilityLabel={worker.name + ', ' + dateFormat.format(asDate(date)) + ', ' + label}
-              disabled={busy || !enabled} onPress={() => onOpen({ worker, shift, day: date })}
+              disabled={busy || !enabled} onPress={() => onOpen(item)} onLongPress={removable ? () => onDelete(item) : undefined}
               style={[styles.gridCell, { width: cellWidth, height: cellWidth }, project && { borderLeftColor: project.color, borderLeftWidth: 4 }]}>
-              <Text style={styles.label}>{label}</Text>
-              {project && <Text style={styles.muted} numberOfLines={1}>{project.name}</Text>}
-              <WeldingMarks shift={shift} />
-              {shift && <RateBreakdown work={shift} />}
+              <Text style={styles.gridValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8}>{label}</Text>
+              {project && <Text style={styles.gridProject} numberOfLines={1}>{project.name}</Text>}
+              {shift?.kind === 'work' && <View style={styles.gridMeta}>
+                <WeldingMarks shift={shift} />
+                <View style={styles.gridRates}><RateBreakdown work={shift} compact /></View>
+              </View>}
             </Pressable>;
           })}
           <View style={styles.gridTotal}>
@@ -339,7 +377,7 @@ function FillRange({ data, shift, busy, onFill, onBack }) {
   );
 }
 
-function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
+function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory, onDelete }) {
   const { worker, shift, day } = item;
   const editable = data.canEdit && shift?.status !== 'closed';
   const [kind, setKind] = useState(shift?.kind ?? 'work');
@@ -410,7 +448,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
       setBusy(false);
     }
   }
-  const labels = { created: 'Создание', edited: 'Изменение', filled: 'Заполнение из смены', month_closed: 'Закрытие месяца' };
+  const labels = { created: 'Создание', edited: 'Изменение', deleted: 'Удаление', filled: 'Заполнение из смены', month_closed: 'Закрытие месяца' };
   return (
     <Modal visible animationType="none" onRequestClose={busy ? undefined : onDismiss}>
       <SafeAreaView style={styles.screen}>
@@ -478,6 +516,7 @@ function ShiftEditor({ item, data, onDismiss, onSave, onFill, onHistory }) {
             <ErrorMessage message={error} />
             {shift && editable && !filling && <Button title="Заполнить диапазон" disabled={busy}
               onPress={() => { setError(''); setFilling(true); }} />}
+            {shift && editable && !filling && <Button title="Удалить запись" danger disabled={busy} onPress={() => onDelete(item)} />}
             {shift && !filling && history === null && <Button title={loadingHistory ? 'Загружаем…' : 'История изменений'}
               disabled={loadingHistory || busy} onPress={showHistory} />}
             {history && !filling && <View style={styles.details}>
@@ -604,6 +643,22 @@ function Workspace({ session, onLogout }) {
     await run(() => refresh());
   }
 
+  function confirmDelete({ worker, shift, day }) {
+    Alert.alert('Удалить запись?', worker.name + ' · ' + dateFormat.format(asDate(day)), [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Удалить', style: 'destructive', onPress: () => run(async () => {
+        setItem(null);
+        try {
+          await api(session, 'shifts/' + shift.id + '/delete', { version: shift.version });
+        } catch (problem) {
+          if (problem.status === 409) await refresh();
+          throw problem;
+        }
+        await refresh();
+      }) }
+    ]);
+  }
+
   function confirmClose() {
     const { month, summary } = data;
     Alert.alert('Закрыть месяц?', [
@@ -688,7 +743,7 @@ function Workspace({ session, onLogout }) {
         </View>}
         <MonthHeader data={data} day={day} setDay={selectDay} busy={busy} onClose={confirmClose}
           onShare={() => run(share)} />
-        {data.workers.length ? <WeekGrid data={data} day={day} busy={busy} onOpen={setItem} /> :
+        {data.workers.length ? <WeekGrid data={data} day={day} busy={busy} onOpen={setItem} onDelete={confirmDelete} /> :
           <Text style={styles.muted}>Нет назначенных сотрудников.</Text>}
       </ScrollView> : <View style={styles.editor}>
         <Text accessibilityRole="header" style={styles.title}>{page}</Text>
@@ -711,13 +766,15 @@ function Workspace({ session, onLogout }) {
         employee={typeof directoryMode === 'object' ? directoryMode : null} busy={busy}
         onSave={saveDirectory} onDismiss={() => setDirectoryMode(directoryMode === 'calendar' ? null : 'employees')} />}
       {item && <ShiftEditor item={item} data={data} onDismiss={() => setItem(null)} onSave={values => save('shifts', values)}
+        onDelete={confirmDelete}
         onFill={values => save('shifts/fill', values)}
         onHistory={id => api(session, 'shifts/' + id + '/history')} />}
     </View>
   );
 }
 
-function DevicePin({ setup, onSubmit, onReset }) {
+function DevicePin({ setup, onSubmit, onUnlock, onReset }) {
+  const [splash, animateLogin] = useLoginSplash();
   const [pin, setPin] = useState('');
   const [repeat, setRepeat] = useState('');
   const [error, setError] = useState('');
@@ -728,13 +785,15 @@ function DevicePin({ setup, onSubmit, onReset }) {
     setBusy(true);
     setError('');
     try {
-      await onSubmit(pin);
+      if (setup) await onSubmit(pin);
+      else onUnlock(await animateLogin(() => onSubmit(pin)));
     } catch (problem) {
       setPin('');
       setError(problem.message);
       if (problem.resetPin) await onReset();
     } finally { setBusy(false); }
   }
+  if (splash) return splash;
   return <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.loginContent}>
       <View style={styles.loginCard}>
@@ -756,7 +815,6 @@ export default function App() {
   const [device, setDevice] = useState(null);
   const [pending, setPending] = useState(null);
   const [ready, setReady] = useState(false);
-  const [launchDone, setLaunchDone] = useState(false);
   useEffect(() => {
     readSession().then(async previous => {
       if (previous?.deviceKey) {
@@ -780,7 +838,7 @@ export default function App() {
   }
   async function unlock(pin) {
     const result = await api({}, 'auth/pin/unlock', { deviceKey: device.deviceKey, pin });
-    setSession({ ...result, address: serverAddress });
+    return { ...result, address: serverAddress };
   }
   async function logout(notifyServer = true) {
     const active = session || pending;
@@ -791,15 +849,14 @@ export default function App() {
     if (notifyServer && device?.deviceKey) await api({}, 'auth/pin/forget', { deviceKey: device.deviceKey }).catch(() => {});
     else if (notifyServer && active) await api(active, 'logout', {}).catch(() => {});
   }
-  const launching = !ready || !launchDone;
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.screen, launching && styles.launchBackground]}>
-        <StatusBar barStyle={launching ? 'light-content' : 'dark-content'} />
-        {launching ? <BrandLaunch onComplete={setLaunchDone} /> :
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="dark-content" />
+        {!ready ? <View style={styles.loading}><ActivityIndicator color={colors.primary} accessibilityLabel="Проверяем сессию" /></View> :
           session ? <Workspace session={session} onLogout={logout} /> :
           pending || device ? <DevicePin key={pending ? 'setup' : 'unlock'} setup={Boolean(pending)}
-            onSubmit={pending ? setupPin : unlock} onReset={() => logout()} /> :
+            onSubmit={pending ? setupPin : unlock} onUnlock={setSession} onReset={() => logout()} /> :
           <Login onLogin={login} />}
       </SafeAreaView>
     </SafeAreaProvider>
@@ -820,12 +877,15 @@ const styles = StyleSheet.create({
   gridName: { width: 144, padding: 8, alignSelf: 'center', fontWeight: '700', color: '#142c24' },
   gridTotal: { width: 100, padding: 6, justifyContent: 'center' },
   gridCell: { padding: 4, justifyContent: 'center', borderWidth: 0.5, borderColor: '#d5e2d9', gap: 2, overflow: 'hidden' },
+  gridValue: { fontSize: 19, lineHeight: 23, fontWeight: '750', color: colors.ink, fontVariant: ['tabular-nums'] },
+  gridProject: { fontSize: 15, lineHeight: 18, color: colors.muted },
+  gridMeta: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  gridRates: { flex: 1, alignItems: 'stretch', minWidth: 0 },
   screen: { flex: 1, backgroundColor: colors.bg },
   fill: { flex: 1, minWidth: 0 },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   loginContent: { flexGrow: 1, justifyContent: 'center', padding: 18, alignItems: 'center' },
   loginCard: { width: '100%', maxWidth: 450, padding: 22, backgroundColor: colors.surface, borderRadius: 20, borderWidth: 1, borderColor: colors.line, gap: 14 },
-  launchBackground: { backgroundColor: '#0b251c' },
   companySignature: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   brandMark: { width: 42, height: 44 },
   brandName: { color: colors.primary, fontWeight: '800', fontSize: 16 },
@@ -842,6 +902,7 @@ const styles = StyleSheet.create({
   buttonCompact: { paddingHorizontal: 6 },
   buttonPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
   buttonText: { color: colors.ink, fontSize: 14, textAlign: 'center', fontWeight: '650' },
+  buttonTextDanger: { color: colors.red },
   buttonTextPrimary: { color: colors.surface },
   pressed: { opacity: 0.75 },
   disabled: { opacity: 0.5 },
