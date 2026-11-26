@@ -11,10 +11,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 ARTWORK = Path(__file__).resolve().parent
 ROOT = ARTWORK.parent
-SCALE = 2
+SCALE = 1.5
 WIDTH, HEIGHT = 300, 148
-COLUMNS, ROWS = 6, 4
-FRAME_MS = 45
+COLUMNS, ROWS = 6, 8
+FRAME_MS = 50
+RAMP_STRETCH = 2.15
 CONTROL = [(89, 101), (89, 108), (92, 115), (99, 118), (129, 118),
            (135, 116), (137, 110), (137, 104)]
 POWER = [(183, 108), (183, 117), (185.25, 123.75), (192, 126),
@@ -62,18 +63,20 @@ def trace(draw, points, color, width):
 
 def render_motion():
     control, power = Cable(CONTROL), Cable(POWER)
-    sprite = Image.new("RGBA", (WIDTH * SCALE * COLUMNS, HEIGHT * SCALE * ROWS))
-    font = ImageFont.truetype("DejaVuSansMono-Bold.ttf", 10 * SCALE)
-    small = ImageFont.truetype("DejaVuSans.ttf", 5 * SCALE)
+    frame_width, frame_height = pixels(WIDTH, HEIGHT)
+    sprite = Image.new("RGBA", (frame_width * COLUMNS, frame_height * ROWS))
+    font = ImageFont.truetype("DejaVuSansMono-Bold.ttf", round(10 * SCALE))
+    small = ImageFont.truetype("DejaVuSans.ttf", round(5 * SCALE))
     for frame in range(COLUMNS * ROWS):
-        ms = frame * FRAME_MS
-        image = Image.new("RGBA", (WIDTH * SCALE, HEIGHT * SCALE))
+        elapsed = frame * FRAME_MS
+        ms = elapsed / RAMP_STRETCH
+        image = Image.new("RGBA", (frame_width, frame_height))
         draw = ImageDraw.Draw(image)
 
         if ms >= 90:
             for x in (16, 25, 34):
                 color = "#acffc3" if x != 25 or ms >= 225 else "#487a68"
-                draw.rounded_rectangle((pixels(x, 50), pixels(x + 5, 53)), radius=SCALE, fill=color)
+                draw.rounded_rectangle((pixels(x, 50), pixels(x + 5, 53)), radius=round(SCALE), fill=color)
 
         if 135 <= ms <= 450:
             tip = control.length * gradient(ms, 135, 440)
@@ -91,18 +94,18 @@ def render_motion():
             leading_edge = power.length * gradient(ms, 395, 860)
             strength = .68 + .32 * frequency / 50
             distances = [float(n) for n in range(0, math.ceil(leading_edge))] + [leading_edge]
-            signal = [power.wave(d, ms, strength) for d in distances]
+            signal = [power.wave(d, elapsed, strength) for d in distances]
             trace(draw, signal, (100, 245, 170, 75), 4.2)
             trace(draw, signal, "#acffc7", 1.45)
             if ms >= 855:
-                angle = math.tau * (ms - 855) / 190
+                angle = math.tau * (elapsed - 855 * RAMP_STRETCH) / 280
                 for direction in (0, math.pi):
                     theta = angle + direction
                     trace(draw, [(284 + 3.3 * math.cos(theta), 72 + 6 * math.sin(theta)),
                                  (284 + 6 * math.cos(theta), 72 + 11 * math.sin(theta))], "#acffc7", 1.25)
                 draw.rectangle((pixels(237, 50), pixels(240, 52)), fill="#acffc3")
 
-        sprite.paste(image, ((frame % COLUMNS) * WIDTH * SCALE, (frame // COLUMNS) * HEIGHT * SCALE))
+        sprite.paste(image, ((frame % COLUMNS) * frame_width, (frame // COLUMNS) * frame_height))
 
     return sprite.quantize(colors=96, method=Image.Quantize.FASTOCTREE)
 

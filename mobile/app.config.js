@@ -2,18 +2,18 @@ module.exports = ({ config }) => ({
   ...config,
   name: 'Табель',
   slug: 'tabel',
-  version: '0.8.3',
+  version: '0.8.4',
   orientation: 'default',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
   ios: {
     bundleIdentifier: 'ru.tabel.worktime',
     supportsTablet: true,
-    buildNumber: '11'
+    buildNumber: '12'
   },
   android: {
     package: 'ru.tabel.worktime',
-    versionCode: 11,
+    versionCode: 12,
     blockedPermissions: [
       'android.permission.READ_EXTERNAL_STORAGE',
       'android.permission.WRITE_EXTERNAL_STORAGE',

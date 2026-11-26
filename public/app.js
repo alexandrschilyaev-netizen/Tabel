@@ -215,7 +215,7 @@ async function signIn(request) {
   splash.hidden = false;
   const animation = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ? Promise.resolve()
-    : new Promise(resolve => setTimeout(resolve, 1340));
+    : new Promise(resolve => setTimeout(resolve, 4000));
   try {
     await Promise.all([request(), animation]);
     await enter();

@@ -3,12 +3,12 @@ import { AccessibilityInfo, Animated, Easing, Image, StyleSheet, Text, View } fr
 import { brandMark } from './brand-mark';
 import { hardware, motion } from './launch-artwork';
 
-const duration = 1340;
+const duration = 4000;
 const frameWidth = 300;
 const frameHeight = 148;
 const columns = 6;
-const rows = 4;
-const frameDuration = 45;
+const rows = 8;
+const frameDuration = 50;
 
 const frames = Array.from({ length: columns * rows }, (_, index) => index);
 const frameTimes = [
@@ -49,11 +49,11 @@ export function BrandLaunch({ onComplete }) {
   }, [onComplete, clock]);
 
   const opacity = clock.interpolate({
-    inputRange: [0, 162, 983, 1080, duration],
+    inputRange: [0, 214, 2189, 2670, duration],
     outputRange: [.35, 1, 1, 0, 0]
   });
   const shift = clock.interpolate({
-    inputRange: [0, 162, 983, 1080, duration],
+    inputRange: [0, 214, 2189, 2670, duration],
     outputRange: [5, 0, 0, -5, -5]
   });
   const frameX = clock.interpolate({
@@ -64,8 +64,8 @@ export function BrandLaunch({ onComplete }) {
     inputRange: frameTimes,
     outputRange: positions.map(index => -Math.floor(index / columns) * frameHeight)
   });
-  const logoOpacity = clock.interpolate({ inputRange: [0, 992, duration], outputRange: [0, 0, 1] });
-  const logoShift = clock.interpolate({ inputRange: [0, 992, duration], outputRange: [5, 5, 0] });
+  const logoOpacity = clock.interpolate({ inputRange: [0, 2450, 3100, duration], outputRange: [0, 0, 1, 1] });
+  const logoShift = clock.interpolate({ inputRange: [0, 2450, 3100, duration], outputRange: [5, 5, 0, 0] });
 
   return (
     <View style={styles.screen} accessibilityLabel="Открываем табель" accessibilityRole="progressbar">

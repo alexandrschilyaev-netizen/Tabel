@@ -69,6 +69,8 @@ svg { width: 100%; height: 100% }
 .demo-tag { font-size: .74rem; padding: 4px 8px; border-radius: 100px; background: var(--warning-bg); color: var(--warning); font-weight: 700 }
 #install-mobile { display: none }
 #logout, #install-mobile { border-color: transparent; color: var(--muted) }
+#logout { flex: none; padding-inline: 10px; white-space: nowrap; }
+#logout:hover, #logout:focus-visible { background: var(--soft); border-color: var(--line); color: var(--primary); }
 main { padding: 30px clamp(16px, 3vw, 36px) 40px; max-width: 1620px; margin-inline: auto }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px 24px; margin-bottom: 22px }
 .page-heading p, .panel-top p, .dialog-head p { color: var(--muted); font-size: .9rem; margin-top: 7px }
@@ -358,7 +360,7 @@ main { padding-top: 16px; }
 .launch-stage { position: relative; height: 160px; display: grid; place-items: center; }
 .launch-circuit {
   display: grid; place-items: center; width: 100%;
-  animation: launch-circuit 1080ms both;
+  animation: launch-circuit 2670ms both;
 }
 .launch-picture {
   width: min(300px, 100%); aspect-ratio: 300 / 148;
@@ -366,12 +368,12 @@ main { padding-top: 16px; }
 }
 .launch-hardware { display: block; width: 100%; height: 100%; }
 .launch-motion-rows {
-  position: absolute; inset: 0 auto auto 0; width: 100%; height: 400%;
-  animation: launch-frame-rows 810ms steps(3, end) both;
+  position: absolute; inset: 0 auto auto 0; width: 100%; height: 800%;
+  animation: launch-frame-rows 2100ms steps(7, end) both;
 }
 .launch-motion-frames {
   display: block; width: 600%; height: 100%; max-width: none;
-  animation: launch-frame-columns 270ms steps(6, jump-none) 4 both;
+  animation: launch-frame-columns 300ms steps(6, jump-none) 8 both;
 }
 @media (min-width: 550px) {
   .launch-stage { height: 226px; }
@@ -379,7 +381,7 @@ main { padding-top: 16px; }
 }
 .launch-lockup {
   position: absolute; display: flex; align-items: center; gap: 15px; text-align: left;
-  animation: launch-logo 1340ms both;
+  animation: launch-logo 650ms 2450ms both;
 }
 .launch-mark { display: grid; place-items: center; width: 74px; height: 74px; border-radius: 19px; background: white; box-shadow: 0 10px 32px #04160f60; }
 .launch-mark img { object-fit: contain; }
@@ -389,17 +391,17 @@ main { padding-top: 16px; }
 #session-status { margin: 0; text-align: center; color: var(--muted); }
 @keyframes launch-circuit {
   0% { opacity: .35; transform: translateY(5px); }
-  15%, 91% { opacity: 1; transform: translateY(0); }
+  8%, 82% { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(-5px); }
 }
 @keyframes launch-frame-rows {
-  to { transform: translateY(-75%); }
+  to { transform: translateY(-87.5%); }
 }
 @keyframes launch-frame-columns {
   to { transform: translateX(-83.333333%); }
 }
 @keyframes launch-logo {
-  0%, 74% { opacity: 0; transform: translateY(5px) scale(.98); }
+  0% { opacity: 0; transform: translateY(5px) scale(.98); }
   100% { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
